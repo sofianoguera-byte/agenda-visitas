@@ -401,12 +401,7 @@ def api_por_publicar():
         b.status,
         CASE WHEN pc.id IS NULL THEN 'Sin cms' ELSE 'Con cms' END AS Tiene_ficha_CMS,
         CASE WHEN LOWER(cd.tipo_de_grav_men) LIKE '%patrimonio de familia con hijos menores%' THEN 'Patrimonio de familia' ELSE 'Sin patrimonio' END AS Patrimonio_familia,
-        CASE WHEN d.estado_patrimonio IN ('Sin patrimonio', 'Patrimonio levantado') THEN 'Sin Patrimonio'
-             WHEN d.estado_patrimonio = 'Levantamiento de patrimonio' THEN 'Levantamiento patrimonio'
-             WHEN d.estado_patrimonio IS NOT NULL THEN 'Desistido/Sin gestion'
-             WHEN LOWER(cd.tipo_de_grav_men) LIKE '%patrimonio de familia con hijos menores%' THEN 'Patrimonio de familia'
-             ELSE 'Sin Patrimonio'
-        END AS estado_patrimonio,
+        d.estado_patrimonio,
         d.estado_cms,
         CASE WHEN DATE(SAFE_CAST(NULLIF(b.fecha_inicio, 'nan') AS TIMESTAMP)) < CURRENT_DATE()
              AND b.status NOT IN ('Cancelado', 'No realizada', 'En obra', 'Agendado')
@@ -423,12 +418,10 @@ def api_por_publicar():
     )
     SELECT nid, c_comercial_captacion, ciudad, c_equipo_seller, Fecha_recorrido, status,
       Tiene_ficha_CMS, Patrimonio_familia, estado_patrimonio, estado_cms, Visita_efectuada,
-      CASE WHEN estado_patrimonio IN ('Desistido/Sin gestion', 'Levantamiento patrimonio') THEN estado_patrimonio
-           ELSE CONCAT(IFNULL(estado_patrimonio, Patrimonio_familia), ', ', IFNULL(Tiene_ficha_CMS, estado_cms), ', ', Visita_efectuada)
-      END AS Estado_actual
+      CONCAT(IFNULL(estado_patrimonio, ''), ', ', IFNULL(Tiene_ficha_CMS, estado_cms), ', ', Visita_efectuada) AS Estado_actual
     FROM base_unica WHERE rn = 1
       AND Visita_efectuada = 'Con 360'
-      AND estado_patrimonio IN ('Sin Patrimonio', 'Patrimonio de familia', 'Levantamiento patrimonio')
+      AND estado_patrimonio IN ('Sin patrimonio', 'Patrimonio levantado')
     ORDER BY Fecha_recorrido DESC
     """
     try:
