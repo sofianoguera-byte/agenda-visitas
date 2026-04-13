@@ -92,23 +92,21 @@ def notificar_visitas_manana():
 
 
 def notificar_canceladas_reagendar():
-    """Notifica a comerciales sobre visitas canceladas que deben reagendar."""
-    ayer = get_fecha_ayer()
-    hoy = get_fecha_hoy()
-    print(f"\n[{datetime.now()}] === CANCELADAS POR REAGENDAR ({ayer} - {hoy}) ===")
+    """Notifica a comerciales sobre TODAS las visitas canceladas sin reagendar."""
+    print(f"\n[{datetime.now()}] === CANCELADAS POR REAGENDAR (todas) ===")
 
-    query = f"""
-    WITH canceladas AS (
-        SELECT nid, MIN(fecha_inicio) AS fecha_agendada,
-            MIN(nombre_agendador) AS nombre_agendador,
-            MIN(email_agendador) AS email_agendador,
-            MIN(status) AS status
+    query = """
+    WITH ultimo_registro AS (
+        SELECT nid, status, fecha_inicio, nombre_agendador, email_agendador,
+            ROW_NUMBER() OVER (PARTITION BY nid ORDER BY modified_date DESC) AS rn
         FROM `papyrus-master.bubble_gold.mart_bubble_schedule_co`
         WHERE nid != 'nan' AND nid IS NOT NULL
             AND visit_type = 'Habi Inmobiliaria'
-            AND status IN ('Cancelado', 'No realizada')
-            AND (modified_date LIKE '{ayer}%' OR modified_date LIKE '{hoy}%')
-        GROUP BY nid
+    ),
+    canceladas AS (
+        SELECT nid, fecha_inicio AS fecha_agendada, nombre_agendador, email_agendador, status
+        FROM ultimo_registro
+        WHERE rn = 1 AND status IN ('Cancelado', 'No realizada')
     )
     SELECT v.*, c.c_comercial_captacion
     FROM canceladas v
