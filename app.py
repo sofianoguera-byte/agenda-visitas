@@ -109,8 +109,8 @@ def get_visitas_manana():
         return []
 
 
-def parsear_correo(msg):
-    """Extrae canceladas de un correo individual."""
+def parsear_correo_completo(msg):
+    """Extrae todos los NIDs del correo, separados en completados y cancelados."""
     body = ""
     if msg.is_multipart():
         for part in msg.walk():
@@ -121,20 +121,19 @@ def parsear_correo(msg):
         body = msg.get_payload(decode=True).decode("utf-8", errors="replace")
 
     if not body:
-        return [], ""
+        return [], [], ""
 
-    # Extraer fecha del reporte
     fecha_match = re.search(r"reporte del registro fotogr.fico del (\d+ de \w+)", body)
     fecha_reporte = fecha_match.group(1) if fecha_match else ""
 
-    # Parsear tabla
     soup = BeautifulSoup(body, "html.parser")
     table = soup.find("table")
     if not table:
-        return [], fecha_reporte
+        return [], [], fecha_reporte
 
     rows = table.find_all("tr")
     cancelados = []
+    completados = []
     for row in rows:
         cells = row.find_all("td")
         if len(cells) >= 4:
@@ -142,16 +141,56 @@ def parsear_correo(msg):
             ciudad = cells[1].get_text(strip=True)
             fotografo = cells[2].get_text(strip=True)
             resultado = cells[3].get_text(strip=True)
-            if nid and nid.isdigit() and resultado.upper().strip() != "SI":
-                cancelados.append({
+            if nid and nid.isdigit():
+                entry = {
                     "nid": nid,
                     "ciudad_correo": ciudad,
                     "fotografo": fotografo,
-                    "motivo": resultado,
                     "fecha_reporte": fecha_reporte,
-                })
+                }
+                if resultado.upper().strip() == "SI":
+                    completados.append(entry)
+                else:
+                    entry["motivo"] = resultado
+                    cancelados.append(entry)
 
+    return cancelados, completados, fecha_reporte
+
+
+def parsear_correo(msg):
+    """Wrapper para compatibilidad - solo devuelve cancelados."""
+    cancelados, _, fecha_reporte = parsear_correo_completo(msg)
     return cancelados, fecha_reporte
+
+
+def leer_completados_correo():
+    """Lee correos de la semana y extrae los NIDs visitados (SI)."""
+    try:
+        mail = imaplib.IMAP4_SSL("imap.gmail.com")
+        mail.login(EMAIL_USER, EMAIL_PASS)
+        mail.select("inbox")
+
+        desde = (datetime.now() - timedelta(days=7)).strftime("%d-%b-%Y")
+        status, messages = mail.search(None, f'FROM "gerencia@cleaningms.com.co" SINCE {desde}')
+        ids = messages[0].split()
+        if not ids:
+            mail.logout()
+            return []
+
+        todos_completados = []
+        for msg_id in ids:
+            status, data = mail.fetch(msg_id, "(RFC822)")
+            msg = email_lib.message_from_bytes(data[0][1])
+            _, completados, fecha_reporte = parsear_correo_completo(msg)
+            for c in completados:
+                c["fecha_reporte"] = fecha_reporte
+            todos_completados.extend(completados)
+
+        mail.logout()
+        return todos_completados
+    except Exception as e:
+        print(f"Error leyendo completados: {e}")
+        return []
 
 
 def leer_canceladas_correo(dias=7):
@@ -411,6 +450,40 @@ def api_por_publicar():
                 "estado_actual": row.Estado_actual or "",
                 "link_publicacion": links.get(nid, ""),
             })
+        # Agregar NIDs del correo de cleaning (visitados "SI") que no estén en la lista
+        nids_existentes = set(i["nid"] for i in inmuebles)
+        completados = leer_completados_correo()
+        nids_correo = list(set(c["nid"] for c in completados))
+        nids_nuevos = [n for n in nids_correo if n not in nids_existentes]
+
+        if nids_nuevos:
+            nids_str = ",".join(f"'{n}'" for n in nids_nuevos)
+            q_extra = f"""
+            SELECT CAST(nid AS STRING) AS nid, c_comercial_captacion, ciudad, c_equipo_seller
+            FROM `papyrus-data.habi_wh_inmobiliaria.consolidado_habi_inmobiliaria`
+            WHERE CAST(nid AS STRING) IN ({nids_str})
+            AND date_publication IS NULL
+            """
+            try:
+                for row in client.query(q_extra).result():
+                    nid = str(row.nid)
+                    completado = next((c for c in completados if c["nid"] == nid), {})
+                    inmuebles.append({
+                        "nid": nid,
+                        "comercial": row.c_comercial_captacion or "",
+                        "ciudad": (row.ciudad or completado.get("ciudad_correo", "")).title(),
+                        "equipo": row.c_equipo_seller or "",
+                        "fecha_recorrido": completado.get("fecha_reporte", "Reciente (correo)"),
+                        "status_bubble": "",
+                        "ficha_cms": "",
+                        "patrimonio": "",
+                        "visita_360": "Con 360",
+                        "estado_actual": f"Visitado {completado.get('fecha_reporte', '')} (correo)",
+                        "link_publicacion": links.get(nid, ""),
+                    })
+            except Exception as e:
+                print(f"Error enriqueciendo completados correo: {e}")
+
         return jsonify(inmuebles)
     except Exception as e:
         print(f"Error consultando por publicar: {e}")
