@@ -1,0 +1,6 @@
+__pycache__
+*.pyc
+*.zip
+ngrok*
+notificar.log
+.env

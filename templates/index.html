@@ -1,0 +1,799 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Agenda de Visitas - Habi</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f0f2f5; color: #1a1a2e; min-height: 100vh; }
+        .header { background: linear-gradient(135deg, #6c3baa, #8b5cf6); color: white; padding: 24px 40px; display: flex; align-items: center; justify-content: space-between; box-shadow: 0 4px 12px rgba(108,59,170,0.3); }
+        .header h1 { font-size: 24px; font-weight: 700; }
+        .header .fecha { font-size: 16px; opacity: 0.9; background: rgba(255,255,255,0.15); padding: 8px 16px; border-radius: 8px; }
+        .header-right { display: flex; align-items: center; gap: 12px; }
+
+        /* Tabs */
+        .tabs { display: flex; gap: 0; padding: 0 40px; background: white; border-bottom: 2px solid #e5e7eb; }
+        .tab { padding: 14px 24px; font-size: 15px; font-weight: 600; cursor: pointer; border-bottom: 3px solid transparent; color: #6b7280; transition: all 0.2s; }
+        .tab:hover { color: #6c3baa; }
+        .tab.active { color: #6c3baa; border-bottom-color: #8b5cf6; }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+
+        .stats-bar { display: flex; gap: 20px; padding: 20px 40px; flex-wrap: wrap; }
+        .stat-card { background: white; border-radius: 12px; padding: 16px 24px; flex: 1; min-width: 150px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); display: flex; align-items: center; gap: 14px; }
+        .stat-card .icon { font-size: 28px; width: 48px; height: 48px; display: flex; align-items: center; justify-content: center; border-radius: 12px; }
+        .stat-card .icon.total { background: #ede9fe; }
+        .stat-card .icon.confirmadas { background: #d1fae5; }
+        .stat-card .icon.canceladas { background: #fee2e2; }
+        .stat-card .icon.pendientes { background: #fef3c7; }
+        .stat-card .info h3 { font-size: 24px; font-weight: 700; }
+        .stat-card .info p { font-size: 13px; color: #6b7280; }
+        .container { padding: 0 40px 40px; }
+        .search-bar { margin-bottom: 20px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+        .search-bar input { flex: 1; min-width: 200px; padding: 12px 16px; border: 2px solid #e5e7eb; border-radius: 10px; font-size: 14px; outline: none; }
+        .search-bar input:focus { border-color: #8b5cf6; }
+        .search-bar select { padding: 12px 16px; border: 2px solid #e5e7eb; border-radius: 10px; font-size: 14px; outline: none; cursor: pointer; background: white; }
+        .loading { text-align: center; padding: 60px; color: #6b7280; }
+        .loading .spinner { width: 40px; height: 40px; border: 4px solid #e5e7eb; border-top-color: #8b5cf6; border-radius: 50%; animation: spin 0.8s linear infinite; margin: 0 auto 16px; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(420px, 1fr)); gap: 16px; }
+        .visita-card { background: white; border-radius: 14px; padding: 24px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); transition: transform 0.2s, box-shadow 0.2s; border-left: 5px solid #8b5cf6; position: relative; }
+        .visita-card:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(0,0,0,0.1); }
+        .visita-card.confirmada { border-left-color: #10b981; background: #f0fdf4; }
+        .visita-card.cancelada-card { border-left-color: #ef4444; background: #fef2f2; }
+        .visita-card.reagendar { border-left-color: #f59e0b; }
+        .card-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px; }
+        .nid-badge { background: #ede9fe; color: #6c3baa; padding: 4px 12px; border-radius: 20px; font-weight: 700; font-size: 14px; }
+        .hora-badge { background: #f3f4f6; color: #374151; padding: 4px 12px; border-radius: 20px; font-size: 13px; font-weight: 600; }
+        .status-pill { padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 700; }
+        .status-pill.cancelado { background: #fee2e2; color: #991b1b; }
+        .status-pill.no-realizada { background: #fef3c7; color: #92400e; }
+        .card-body { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 18px; }
+        .field { display: flex; flex-direction: column; gap: 2px; }
+        .field.full-width { grid-column: 1 / -1; }
+        .field label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: #9ca3af; font-weight: 600; }
+        .field span { font-size: 14px; font-weight: 500; color: #1f2937; }
+        .card-actions { display: flex; gap: 8px; flex-wrap: wrap; padding-top: 16px; border-top: 1px solid #f3f4f6; }
+        .btn { padding: 8px 16px; border: none; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; transition: all 0.2s; text-decoration: none; color: white; }
+        .btn:hover { transform: translateY(-1px); filter: brightness(1.1); }
+        .btn:active { transform: translateY(0); }
+        .btn-call { background: #3b82f6; }
+        .btn-whatsapp { background: #25d366; }
+        .btn-confirmar { background: #10b981; }
+        .btn-cancelar { background: #ef4444; }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none !important; }
+        .status-badge { position: absolute; top: 16px; right: 16px; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 700; text-transform: uppercase; }
+        .status-badge.confirmada { background: #d1fae5; color: #065f46; }
+        .status-badge.cancelada { background: #fee2e2; color: #991b1b; }
+        .empty-state { text-align: center; padding: 80px 20px; color: #9ca3af; }
+        .empty-state h2 { font-size: 20px; margin-bottom: 8px; color: #6b7280; }
+        .toast { position: fixed; bottom: 24px; right: 24px; padding: 14px 24px; border-radius: 10px; color: white; font-weight: 600; font-size: 14px; z-index: 1000; transform: translateY(100px); opacity: 0; transition: all 0.3s; box-shadow: 0 8px 24px rgba(0,0,0,0.2); }
+        .toast.show { transform: translateY(0); opacity: 1; }
+        .toast.success { background: #10b981; }
+        .toast.error { background: #ef4444; }
+        .toast.info { background: #3b82f6; }
+        .modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 999; opacity: 0; pointer-events: none; transition: opacity 0.2s; }
+        .modal-overlay.active { opacity: 1; pointer-events: all; }
+        .modal { background: white; border-radius: 16px; padding: 32px; max-width: 440px; width: 90%; text-align: center; }
+        .modal h2 { font-size: 20px; margin-bottom: 12px; color: #1f2937; }
+        .modal p { color: #6b7280; margin-bottom: 24px; line-height: 1.5; }
+        .modal-actions { display: flex; gap: 12px; justify-content: center; }
+        .modal-actions .btn { padding: 10px 24px; font-size: 14px; }
+        .btn-secondary { background: #e5e7eb; color: #374151; }
+        .modal-notificar { max-width: 600px; text-align: left; max-height: 80vh; overflow-y: auto; }
+        .comercial-row { display: flex; align-items: center; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid #f3f4f6; gap: 10px; flex-wrap: wrap; }
+        .comercial-row:last-child { border-bottom: none; }
+        .comercial-info { flex: 1; min-width: 200px; }
+        .comercial-info .name { font-weight: 600; font-size: 14px; color: #1f2937; }
+        .comercial-info .count { font-size: 12px; color: #6b7280; }
+        .comercial-actions { display: flex; gap: 6px; }
+        .btn-sm { padding: 6px 12px; font-size: 12px; }
+        .btn-gchat { background: #1a73e8; }
+        .btn-email { background: #8b5cf6; }
+        .btn-notify-all { background: linear-gradient(135deg, #6c3baa, #8b5cf6); width: 100%; justify-content: center; margin-top: 16px; padding: 12px; font-size: 15px; }
+        .copied-toast { background: #10b981; color: white; padding: 4px 10px; border-radius: 6px; font-size: 11px; font-weight: 600; display: none; }
+        @media (max-width: 768px) {
+            .header { padding: 16px 20px; flex-direction: column; gap: 8px; }
+            .tabs { padding: 0 20px; }
+            .stats-bar { padding: 16px 20px; }
+            .container { padding: 0 20px 20px; }
+            .card-grid { grid-template-columns: 1fr; }
+            .card-actions { flex-direction: column; }
+            .btn { justify-content: center; }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Agenda de Visitas Habi</h1>
+        <div class="header-right">
+            <div class="fecha">{{ fecha_manana }}</div>
+            <button class="btn" style="background:rgba(255,255,255,0.2);color:white;font-size:14px;" onclick="abrirModalNotificar()">Notificar Comerciales</button>
+        </div>
+    </div>
+
+    <!-- Pestañas -->
+    <div class="tabs">
+        <div class="tab active" data-tab="visitas" onclick="switchTab('visitas')">Visitas de Mañana</div>
+        <div class="tab" data-tab="canceladas" onclick="switchTab('canceladas')">Canceladas por Reagendar</div>
+        <div class="tab" data-tab="publicar" onclick="switchTab('publicar')">Por Publicar</div>
+    </div>
+
+    <!-- TAB 1: Visitas de mañana -->
+    <div class="tab-content active" id="tab-visitas">
+        <div class="stats-bar">
+            <div class="stat-card"><div class="icon total">&#x1f4cb;</div><div class="info"><h3 id="stat-total">-</h3><p>Total</p></div></div>
+            <div class="stat-card"><div class="icon confirmadas">&#x2705;</div><div class="info"><h3 id="stat-confirmadas">0</h3><p>Confirmadas</p></div></div>
+            <div class="stat-card"><div class="icon canceladas">&#x274c;</div><div class="info"><h3 id="stat-canceladas">0</h3><p>Canceladas</p></div></div>
+            <div class="stat-card"><div class="icon pendientes">&#x23f3;</div><div class="info"><h3 id="stat-pendientes">-</h3><p>Pendientes</p></div></div>
+        </div>
+        <div class="container">
+            <div class="search-bar">
+                <input type="text" id="search" placeholder="Buscar por NID, ciudad o comercial...">
+                <select id="filter-equipo"><option value="todos">Todos los equipos</option></select>
+                <select id="filter-comercial"><option value="todos">Todos los comerciales</option></select>
+                <select id="filter-ciudad"><option value="todos">Todas las ciudades</option></select>
+                <select id="filter-status">
+                    <option value="todos">Todos</option>
+                    <option value="pendiente">Pendientes</option>
+                    <option value="confirmada">Confirmadas</option>
+                    <option value="cancelada">Canceladas</option>
+                </select>
+            </div>
+            <div id="loading" class="loading"><div class="spinner"></div><p>Cargando visitas de mañana...</p></div>
+            <div id="card-grid" class="card-grid" style="display:none;"></div>
+            <div id="empty-state" class="empty-state" style="display:none;"><h2>No hay visitas programadas</h2><p>No se encontraron visitas para mañana.</p></div>
+        </div>
+    </div>
+
+    <!-- TAB 2: Canceladas por reagendar -->
+    <div class="tab-content" id="tab-canceladas">
+        <div class="stats-bar">
+            <div class="stat-card"><div class="icon canceladas">&#x1f4cb;</div><div class="info"><h3 id="stat-cancel-total">-</h3><p>Total canceladas</p></div></div>
+            <div class="stat-card"><div class="icon pendientes">&#x23f3;</div><div class="info"><h3 id="stat-cancel-pendientes">-</h3><p>Por reagendar</p></div></div>
+            <div class="stat-card"><div class="icon confirmadas">&#x2705;</div><div class="info"><h3 id="stat-cancel-contactados">0</h3><p>Contactados</p></div></div>
+            <div class="stat-card"><div class="icon total">&#x1f4e7;</div><div class="info"><h3 id="stat-fecha-reporte" style="font-size:14px;">-</h3><p>Fecha reporte correo</p></div></div>
+        </div>
+        <div class="container">
+            <div class="search-bar">
+                <input type="text" id="search-cancel" placeholder="Buscar por NID, ciudad o comercial...">
+                <select id="filter-rango-cancel" onchange="cambiarRango()">
+                    <option value="7" selected>Última semana</option>
+                    <option value="14">Últimos 15 días</option>
+                    <option value="30">Último mes</option>
+                    <option value="60">Últimos 2 meses</option>
+                    <option value="90">Últimos 3 meses</option>
+                </select>
+                <select id="filter-dia-cancel"><option value="todos">Todos los días</option></select>
+                <select id="filter-comercial-cancel"><option value="todos">Todos los comerciales</option></select>
+                <select id="filter-ciudad-cancel"><option value="todos">Todas las ciudades</option></select>
+            </div>
+            <div id="loading-cancel" class="loading"><div class="spinner"></div><p>Cargando visitas canceladas...</p></div>
+            <div id="card-grid-cancel" class="card-grid" style="display:none;"></div>
+            <div id="empty-cancel" class="empty-state" style="display:none;"><h2>No hay visitas canceladas</h2><p>No se encontraron cancelaciones recientes.</p></div>
+        </div>
+    </div>
+
+    <!-- TAB 3: Por Publicar -->
+    <div class="tab-content" id="tab-publicar">
+        <div class="stats-bar">
+            <div class="stat-card"><div class="icon total">&#x1f4cb;</div><div class="info"><h3 id="stat-pub-total">-</h3><p>Total por publicar</p></div></div>
+            <div class="stat-card"><div class="icon confirmadas">&#x2705;</div><div class="info"><h3 id="stat-pub-publicados">0</h3><p>Publicados</p></div></div>
+            <div class="stat-card"><div class="icon canceladas">&#x274c;</div><div class="info"><h3 id="stat-pub-nopub">0</h3><p>No publicados</p></div></div>
+            <div class="stat-card"><div class="icon pendientes">&#x23f3;</div><div class="info"><h3 id="stat-pub-pendientes">-</h3><p>Sin gestionar</p></div></div>
+        </div>
+        <div class="container">
+            <div class="search-bar">
+                <input type="text" id="search-pub" placeholder="Buscar por NID, ciudad, comercial o estado...">
+                <select id="filter-equipo-pub"><option value="todos">Todos los equipos</option></select>
+                <select id="filter-comercial-pub"><option value="todos">Todos los comerciales</option></select>
+                <select id="filter-estado-pub">
+                    <option value="todos">Todos los estados</option>
+                    <option value="pendiente">Sin gestionar</option>
+                    <option value="publicado">Publicados</option>
+                    <option value="no_publicado">No publicados</option>
+                </select>
+            </div>
+            <div id="loading-pub" class="loading"><div class="spinner"></div><p>Cargando inmuebles por publicar...</p></div>
+            <div id="table-pub-container" style="display:none;overflow-x:auto;">
+                <table id="table-pub" style="width:100%;border-collapse:collapse;background:white;border-radius:12px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.06);">
+                    <thead>
+                        <tr style="background:#6c3baa;color:white;text-align:left;">
+                            <th style="padding:12px 16px;font-size:13px;">NID</th>
+                            <th style="padding:12px 16px;font-size:13px;">Comercial</th>
+                            <th style="padding:12px 16px;font-size:13px;">Equipo</th>
+                            <th style="padding:12px 16px;font-size:13px;">Ciudad</th>
+                            <th style="padding:12px 16px;font-size:13px;">Fecha 360</th>
+                            <th style="padding:12px 16px;font-size:13px;">Estado Actual</th>
+                            <th style="padding:12px 16px;font-size:13px;">Link Publicación</th>
+                            <th style="padding:12px 16px;font-size:13px;">Acciones</th>
+                            <th style="padding:12px 16px;font-size:13px;">Comentario</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tbody-pub"></tbody>
+                </table>
+            </div>
+            <div id="empty-pub" class="empty-state" style="display:none;"><h2>No hay inmuebles por publicar</h2></div>
+        </div>
+    </div>
+
+    <!-- Modales -->
+    <div class="modal-overlay" id="modal-cancelar">
+        <div class="modal">
+            <h2>Confirmar cancelación</h2>
+            <p>¿Estás seguro de cancelar la visita para el NID <strong id="modal-nid"></strong>?<br>Se enviará un correo a mariaalonso@habi.co.</p>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" onclick="cerrarModal()">Volver</button>
+                <button class="btn btn-cancelar" id="btn-confirmar-cancelacion" onclick="confirmarCancelacion()">Sí, cancelar visita</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="modal-notificar">
+        <div class="modal modal-notificar">
+            <h2>Notificar Comerciales</h2>
+            <p style="color:#6b7280;margin-bottom:16px;">Envía un mensaje a cada comercial con visitas agendadas para mañana.</p>
+            <div id="lista-comerciales"></div>
+            <button class="btn btn-notify-all" onclick="notificarTodos()">Enviar correo a todos</button>
+            <button class="btn btn-secondary" style="width:100%;justify-content:center;margin-top:8px;" onclick="cerrarModalNotificar()">Cerrar</button>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="modal-desistir">
+        <div class="modal">
+            <h2>Confirmar desistimiento</h2>
+            <p>¿El cliente del NID <strong id="modal-desistir-nid"></strong> quiere desistir del proceso?</p>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" onclick="cerrarModalDesistir()">No, volver</button>
+                <button class="btn btn-cancelar" onclick="confirmarDesistir()">Sí, quiere desistir</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="toast" id="toast"></div>
+
+    <script>
+        let visitas = [];
+        let canceladas = [];
+        let statusMap = JSON.parse(localStorage.getItem('statusMap') || '{}');
+        let cancelContactMap = JSON.parse(localStorage.getItem('cancelContactMap') || '{}');
+        let canceladasManuales = JSON.parse(localStorage.getItem('canceladasManuales') || '[]');
+
+        function saveState() {
+            localStorage.setItem('statusMap', JSON.stringify(statusMap));
+            localStorage.setItem('cancelContactMap', JSON.stringify(cancelContactMap));
+            localStorage.setItem('canceladasManuales', JSON.stringify(canceladasManuales));
+            localStorage.setItem('whatsappMap', JSON.stringify(whatsappMap));
+        }
+
+        function marcarWhatsApp(nid) {
+            whatsappMap[nid] = true;
+            saveState();
+            renderCards();
+            renderCanceladas();
+        }
+        let pendingCancelNid = null;
+
+        const PAGE_URL = window.location.href;
+        const FECHA_MANANA = '{{ fecha_manana }}';
+
+        // --- Tabs ---
+        function switchTab(tab) {
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+            document.querySelector(`.tab[data-tab="${tab}"]`).classList.add('active');
+            document.getElementById('tab-' + tab).classList.add('active');
+            if (tab === 'canceladas' && !canceladasLoaded) fetchCanceladas();
+            if (tab === 'publicar' && !publicarLoaded) fetchPorPublicar();
+        }
+
+        // --- Init ---
+        document.addEventListener('DOMContentLoaded', fetchVisitas);
+        let whatsappMap = JSON.parse(localStorage.getItem('whatsappMap') || '{}');
+
+        document.getElementById('search').addEventListener('input', renderCards);
+        document.getElementById('filter-status').addEventListener('change', renderCards);
+        document.getElementById('filter-equipo').addEventListener('change', renderCards);
+        document.getElementById('filter-comercial').addEventListener('change', renderCards);
+        document.getElementById('filter-ciudad').addEventListener('change', renderCards);
+        document.getElementById('search-cancel').addEventListener('input', renderCanceladas);
+        document.getElementById('filter-dia-cancel').addEventListener('change', renderCanceladas);
+        document.getElementById('filter-comercial-cancel').addEventListener('change', renderCanceladas);
+        document.getElementById('filter-ciudad-cancel').addEventListener('change', renderCanceladas);
+
+        // --- Helpers ---
+        function formatPhone(phone) {
+            if (!phone) return '';
+            let clean = phone.replace(/[^0-9]/g, '');
+            if (clean.length === 10 && clean.startsWith('3')) clean = '57' + clean;
+            return clean;
+        }
+
+        function showToast(message, type) {
+            const toast = document.getElementById('toast');
+            toast.textContent = message;
+            toast.className = 'toast ' + type + ' show';
+            setTimeout(() => toast.classList.remove('show'), 4000);
+        }
+
+        function buildFilterOptions(data, selId, key) {
+            const values = [...new Set(data.map(v => v[key]).filter(c => c))].sort();
+            const sel = document.getElementById(selId);
+            // Clear old options except first
+            while (sel.options.length > 1) sel.remove(1);
+            values.forEach(c => { const o = document.createElement('option'); o.value = c; o.textContent = c; sel.appendChild(o); });
+        }
+
+        // =====================
+        // TAB 1: VISITAS MAÑANA
+        // =====================
+        async function fetchVisitas() {
+            try {
+                const params = new URLSearchParams(window.location.search);
+                const testParam = params.get('test') ? '?test=1' : '';
+                const res = await fetch('/api/visitas' + testParam);
+                visitas = await res.json();
+                document.getElementById('loading').style.display = 'none';
+                if (visitas.length === 0) {
+                    document.getElementById('empty-state').style.display = 'block';
+                } else {
+                    document.getElementById('card-grid').style.display = 'grid';
+                    buildFilterOptions(visitas, 'filter-equipo', 'equipo');
+                    buildFilterOptions(visitas, 'filter-comercial', 'c_comercial_captacion');
+                    buildFilterOptions(visitas, 'filter-ciudad', 'ciudad');
+                    renderCards();
+                }
+            } catch (err) {
+                document.getElementById('loading').innerHTML = '<p style="color:#ef4444;">Error al cargar visitas.</p>';
+            }
+        }
+
+        function getStatus(nid) { return statusMap[nid] || 'pendiente'; }
+
+        function getFilteredVisitas(ignoreFilter) {
+            const search = document.getElementById('search').value.toLowerCase();
+            const sf = ignoreFilter ? 'todos' : document.getElementById('filter-status').value;
+            const ef = ignoreFilter ? 'todos' : document.getElementById('filter-equipo').value;
+            const cf = ignoreFilter ? 'todos' : document.getElementById('filter-comercial').value;
+            const cif = ignoreFilter ? 'todos' : document.getElementById('filter-ciudad').value;
+            return visitas.filter(v => {
+                const ms = !search || v.nid.toLowerCase().includes(search) || v.ciudad.toLowerCase().includes(search) || v.c_comercial_captacion.toLowerCase().includes(search);
+                const st = getStatus(v.nid);
+                return ms && (sf === 'todos' || st === sf) && (ef === 'todos' || v.equipo === ef) && (cf === 'todos' || v.c_comercial_captacion === cf) && (cif === 'todos' || v.ciudad === cif);
+            });
+        }
+
+        function updateStats() {
+            const total = visitas.length;
+            let conf = 0, canc = 0;
+            visitas.forEach(v => { if (statusMap[v.nid] === 'confirmada') conf++; if (statusMap[v.nid] === 'cancelada') canc++; });
+            document.getElementById('stat-total').textContent = total;
+            document.getElementById('stat-confirmadas').textContent = conf;
+            document.getElementById('stat-canceladas').textContent = canc;
+            document.getElementById('stat-pendientes').textContent = total - conf - canc;
+        }
+
+        function getWhatsAppMessage(visita) {
+            const fecha = visita.fecha_fin ? visita.fecha_fin.split('T')[0] : 'mañana';
+            const hora = visita.hora || '';
+            return encodeURIComponent(
+                `Hola, ¿cómo estás? Te escribimos de Habi. ` +
+                `Recuerda que mañana ${fecha} a las ${hora} está agendada la visita de toma de fotografías profesionales ` +
+                `de tu inmueble para publicarlo en nuestra plataforma. ` +
+                `¿Podrías confirmarnos si puedes atender la visita? ` +
+                `Quedamos atentos a tu respuesta. ¡Gracias!`
+            );
+        }
+
+        function renderCards() {
+            const grid = document.getElementById('card-grid');
+            const filtered = getFilteredVisitas(false);
+            if (filtered.length === 0 && visitas.length > 0) {
+                grid.innerHTML = '<div class="empty-state"><h2>Sin resultados</h2></div>';
+            } else {
+                grid.innerHTML = filtered.map(v => {
+                    const status = getStatus(v.nid);
+                    const phone = formatPhone(v.telefono_cliente);
+                    const contacted = whatsappMap[v.nid];
+                    return `
+                    <div class="visita-card ${status === 'cancelada' ? 'cancelada-card' : status}" id="card-${v.nid}">
+                        <div style="position:absolute;top:16px;right:16px;display:flex;gap:6px;">
+                            ${contacted ? '<span style="background:#d1fae5;color:#065f46;padding:4px 10px;border-radius:20px;font-size:11px;font-weight:700;">Contactado</span>' : ''}
+                            ${status !== 'pendiente' ? `<span class="status-badge" style="position:static;background:${status === 'confirmada' ? '#d1fae5;color:#065f46' : '#fee2e2;color:#991b1b'};">${status}</span>` : ''}
+                        </div>
+                        <div class="card-header">
+                            <span class="nid-badge">NID ${v.nid}</span>
+                            ${v.hora ? `<span class="hora-badge">${v.hora}</span>` : ''}
+                        </div>
+                        <div class="card-body">
+                            <div class="field"><label>Comercial</label><span>${v.c_comercial_captacion || 'N/A'}</span></div>
+                            <div class="field"><label>Equipo</label><span>${v.equipo || 'N/A'}</span></div>
+                            <div class="field"><label>Ciudad</label><span>${v.ciudad || 'N/A'}</span></div>
+                            <div class="field"><label>Agendador</label><span>${v.nombre_agendador || 'N/A'}</span></div>
+                            <div class="field full-width"><label>Dirección</label><span>${v.direccion || ''} ${v.torre_apto || ''} ${v.conjunto || ''}</span></div>
+                            <div class="field"><label>Teléfono Cliente</label><span>${v.telefono_cliente || 'Sin teléfono'}</span></div>
+                        </div>
+                        <div class="card-actions">
+                            ${phone ? `
+                                <a href="tel:+${phone}" class="btn btn-call">&#x1f4de; Llamar</a>
+                                <a href="https://wa.me/${phone}?text=${getWhatsAppMessage(v)}" target="_blank" class="btn btn-whatsapp" onclick="marcarWhatsApp('${v.nid}')">&#x1f4ac; WhatsApp</a>
+                            ` : `<span class="btn btn-call" style="opacity:0.4;cursor:default;">&#x1f4de; Sin teléfono</span>`}
+                            <button class="btn btn-confirmar" onclick="toggleStatus('${v.nid}','confirmada')">&#x2705; Confirmar</button>
+                            <button class="btn btn-cancelar" onclick="abrirModalCancelar('${v.nid}')">&#x274c; Cancelar</button>
+                        </div>
+                    </div>`;
+                }).join('');
+            }
+            updateStats();
+        }
+
+        function toggleStatus(nid, newStatus) {
+            if (statusMap[nid] === newStatus) {
+                delete statusMap[nid];
+                saveState(); renderCards();
+                showToast('NID ' + nid + ' vuelto a pendiente', 'info');
+            } else {
+                statusMap[nid] = newStatus;
+                saveState(); renderCards();
+                showToast('NID ' + nid + ' marcado como ' + newStatus, 'success');
+            }
+        }
+
+        function abrirModalCancelar(nid) { pendingCancelNid = nid; document.getElementById('modal-nid').textContent = nid; document.getElementById('modal-cancelar').classList.add('active'); }
+        function cerrarModal() { pendingCancelNid = null; document.getElementById('modal-cancelar').classList.remove('active'); }
+
+        async function confirmarCancelacion() {
+            if (!pendingCancelNid) return;
+            const nid = pendingCancelNid;
+            const visita = visitas.find(v => v.nid === nid);
+            const btn = document.getElementById('btn-confirmar-cancelacion');
+            btn.disabled = true; btn.textContent = 'Procesando...';
+            try {
+                const res = await fetch('/api/cancelar', { method: 'POST', headers: {'Content-Type':'application/json'},
+                    body: JSON.stringify({ nid: visita.nid, ciudad: visita.ciudad, fecha_fin: (visita.fecha_fin ? visita.fecha_fin.split('T')[0] : '') + (visita.hora ? ' a las ' + visita.hora : '') })
+                });
+                const data = await res.json();
+                window.open(data.gmail_url, '_blank');
+                statusMap[nid] = 'cancelada';
+                // Agregar a canceladas para reagendar
+                const nuevaCancelada = {
+                    nid: visita.nid,
+                    ciudad: visita.ciudad,
+                    fotografo: '',
+                    motivo_cancelacion: 'Cancelado por el cliente (desde agenda)',
+                    c_comercial_captacion: visita.c_comercial_captacion,
+                    telefono_cliente: visita.telefono_cliente,
+                    direccion: visita.direccion || '',
+                    fecha_reporte: 'Hoy',
+                    fecha_agendada: (visita.fecha_fin ? visita.fecha_fin.split('T')[0] : '') + (visita.hora ? ' ' + visita.hora : ''),
+                };
+                canceladas.push(nuevaCancelada);
+                canceladasManuales.push(nuevaCancelada);
+                saveState();
+                if (canceladasLoaded) renderCanceladas();
+                showToast(`NID ${nid} cancelada. Se abrió correo para mariaalonso@habi.co`, 'info');
+            } catch (err) { showToast('Error: ' + err.message, 'error'); }
+            btn.disabled = false; btn.textContent = 'Sí, cancelar visita';
+            cerrarModal(); renderCards();
+        }
+
+        // ==========================
+        // TAB 2: CANCELADAS REAGENDAR
+        // ==========================
+        let fechasReporte = [];
+        let canceladasLoaded = false;
+
+        function cambiarRango() {
+            canceladasLoaded = false;
+            canceladas = [];
+            cancelContactMap = {};
+            document.getElementById('card-grid-cancel').style.display = 'none';
+            document.getElementById('empty-cancel').style.display = 'none';
+            document.getElementById('loading-cancel').style.display = 'block';
+            document.getElementById('loading-cancel').innerHTML = '<div class="spinner"></div><p>Cargando canceladas...</p>';
+            fetchCanceladas();
+        }
+
+        async function fetchCanceladas() {
+            try {
+                const dias = document.getElementById('filter-rango-cancel').value;
+                const res = await fetch('/api/canceladas?dias=' + dias);
+                const data = await res.json();
+                canceladas = data.canceladas || [];
+                fechasReporte = data.fechas_reporte || [];
+                document.getElementById('loading-cancel').style.display = 'none';
+                // Agregar canceladas manuales (desde pestaña 1) que no estén ya
+                const nidsExistentes = new Set(canceladas.map(c => c.nid));
+                canceladasManuales.forEach(cm => {
+                    if (!nidsExistentes.has(cm.nid)) canceladas.push(cm);
+                });
+                canceladasLoaded = true;
+                if (canceladas.length === 0) {
+                    document.getElementById('empty-cancel').style.display = 'block';
+                } else {
+                    document.getElementById('card-grid-cancel').style.display = 'grid';
+                    buildFilterOptions(canceladas, 'filter-dia-cancel', 'fecha_reporte');
+                    buildFilterOptions(canceladas, 'filter-comercial-cancel', 'c_comercial_captacion');
+                    buildFilterOptions(canceladas, 'filter-ciudad-cancel', 'ciudad');
+                    renderCanceladas();
+                }
+            } catch (err) {
+                document.getElementById('loading-cancel').innerHTML = '<p style="color:#ef4444;">Error al cargar canceladas.</p>';
+            }
+        }
+
+        function getFilteredCanceladas() {
+            const search = document.getElementById('search-cancel').value.toLowerCase();
+            const df = document.getElementById('filter-dia-cancel').value;
+            const cf = document.getElementById('filter-comercial-cancel').value;
+            const cif = document.getElementById('filter-ciudad-cancel').value;
+            return canceladas.filter(v => {
+                const ms = !search || v.nid.toLowerCase().includes(search) || v.ciudad.toLowerCase().includes(search) || v.c_comercial_captacion.toLowerCase().includes(search);
+                return ms && (df === 'todos' || v.fecha_reporte === df) && (cf === 'todos' || v.c_comercial_captacion === cf) && (cif === 'todos' || v.ciudad === cif);
+            });
+        }
+
+        function getWhatsAppReagendar(v) {
+            const fecha = v.fecha_agendada || v.fecha_reporte || 'día anterior';
+            return encodeURIComponent(
+                `Holaa, ¿cómo estás? Te escribimos de Habi. ` +
+                `Vemos que no pudimos realizar la visita de la toma de fotografías que teníamos agendada para el ${fecha}. ` +
+                `¿Te gustaría reagendar? Quedamos atentos.`
+            );
+        }
+
+        function renderCanceladas() {
+            const grid = document.getElementById('card-grid-cancel');
+            const filtered = getFilteredCanceladas();
+            if (filtered.length === 0 && canceladas.length > 0) {
+                grid.innerHTML = '<div class="empty-state"><h2>Sin resultados</h2></div>';
+            } else {
+                grid.innerHTML = filtered.map(v => {
+                    const phone = formatPhone(v.telefono_cliente);
+                    const contacted = whatsappMap[v.nid];
+                    return `
+                    <div class="visita-card reagendar ${contacted ? 'confirmada' : ''}">
+                        ${contacted ? '<span style="position:absolute;top:16px;right:16px;background:#d1fae5;color:#065f46;padding:4px 10px;border-radius:20px;font-size:11px;font-weight:700;">Contactado</span>' : ''}
+                        <div class="card-header">
+                            <span class="nid-badge">NID ${v.nid}</span>
+                            <span class="status-pill cancelado">Cancelada</span>
+                        </div>
+                        <div class="card-body">
+                            <div class="field"><label>Comercial</label><span>${v.c_comercial_captacion || 'N/A'}</span></div>
+                            <div class="field"><label>Ciudad</label><span>${v.ciudad || 'N/A'}</span></div>
+                            <div class="field"><label>Fecha agendada</label><span>${v.fecha_agendada || 'N/A'}</span></div>
+                            <div class="field"><label>Fotógrafo</label><span>${v.fotografo || 'N/A'}</span></div>
+                            <div class="field"><label>Teléfono Cliente</label><span>${v.telefono_cliente || 'Sin teléfono'}</span></div>
+                            <div class="field"><label>Reporte del</label><span>${v.fecha_reporte || 'N/A'}</span></div>
+                            <div class="field full-width"><label>Motivo cancelación</label><span style="color:#991b1b;">${v.motivo_cancelacion || 'N/A'}</span></div>
+                            ${v.direccion ? `<div class="field full-width"><label>Dirección</label><span>${v.direccion}</span></div>` : ''}
+                        </div>
+                        <div class="card-actions">
+                            ${phone ? `
+                                <a href="tel:+${phone}" class="btn btn-call">&#x1f4de; Llamar</a>
+                                <a href="https://wa.me/${phone}?text=${getWhatsAppReagendar(v)}" target="_blank" class="btn btn-whatsapp" onclick="marcarWhatsAppCancel('${v.nid}')">&#x1f4ac; WhatsApp Reagendar</a>
+                            ` : `<span class="btn btn-call" style="opacity:0.4;cursor:default;">&#x1f4de; Sin teléfono</span>`}
+                            <a href="https://visitahabi.bubbleapps.io/home_algoritmo" target="_blank" class="btn btn-confirmar">&#x1f4c5; Reagendar</a>
+                            <button class="btn btn-cancelar" onclick="abrirModalDesistir('${v.nid}')">&#x1f6ab; Quiere desistir</button>
+                        </div>
+                    </div>`;
+                }).join('');
+            }
+            // Stats
+            const total = canceladas.length;
+            const cont = Object.keys(cancelContactMap).length;
+            document.getElementById('stat-cancel-total').textContent = total;
+            document.getElementById('stat-cancel-contactados').textContent = cont;
+            document.getElementById('stat-cancel-pendientes').textContent = total - cont;
+            document.getElementById('stat-fecha-reporte').textContent = fechasReporte.length ? fechasReporte.join(', ') : '-';
+        }
+
+        function marcarWhatsAppCancel(nid) {
+            whatsappMap[nid] = true;
+            saveState();
+            // Re-render after a small delay to allow the link to open
+            setTimeout(() => renderCanceladas(), 300);
+        }
+
+        let pendingDesistirNid = null;
+
+        function abrirModalDesistir(nid) {
+            pendingDesistirNid = nid;
+            document.getElementById('modal-desistir-nid').textContent = nid;
+            document.getElementById('modal-desistir').classList.add('active');
+        }
+
+        function cerrarModalDesistir() {
+            pendingDesistirNid = null;
+            document.getElementById('modal-desistir').classList.remove('active');
+        }
+
+        async function confirmarDesistir() {
+            if (!pendingDesistirNid) return;
+            const nid = pendingDesistirNid;
+            const v = canceladas.find(c => c.nid === nid);
+            try {
+                await fetch('https://script.google.com/macros/s/AKfycbyvJCuniSwjN0tb6mfVuEsXwMPnXl9ChAHkhyOk0cK3tkxADBOAo6XQl1-sxKeyzT30Uw/exec', {
+                    method: 'POST',
+                    mode: 'no-cors',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        nid: nid,
+                        comercial: v ? v.c_comercial_captacion : ''
+                    })
+                });
+            } catch (e) { console.error(e); }
+            cancelContactMap[nid] = true;
+            saveState();
+            cerrarModalDesistir();
+            renderCanceladas();
+            showToast('NID ' + nid + ' marcado como desistimiento', 'info');
+        }
+
+        // ==========================
+        // NOTIFICAR COMERCIALES
+        // ==========================
+        function getComerciales() {
+            const map = {};
+            visitas.forEach(v => {
+                const email = v.c_comercial_captacion;
+                if (!email) return;
+                if (!map[email]) map[email] = { email, nombre: v.nombre_agendador || email, count: 0 };
+                map[email].count++;
+            });
+            return Object.values(map).sort((a, b) => b.count - a.count);
+        }
+
+        function getMensajeComercial(c) {
+            return `Hola ${c.nombre}, tienes ${c.count} visita(s) 360 agendada(s) para mañana ${FECHA_MANANA}. Ingresa en el siguiente link y escríbeles para confirmar la visita:\n\n${PAGE_URL}\n\nUtiliza los botones de WhatsApp para escribirles y usa los botones de Confirmar y Cancelar para informar a Remo.`;
+        }
+
+        function getMailtoComercial(c) {
+            const asunto = `Tienes ${c.count} visita(s) 360 agendada(s) para mañana ${FECHA_MANANA}`;
+            return `mailto:${c.email}?subject=${encodeURIComponent(asunto)}&body=${encodeURIComponent(getMensajeComercial(c))}`;
+        }
+
+        function abrirModalNotificar() {
+            const comerciales = getComerciales();
+            const lista = document.getElementById('lista-comerciales');
+            if (comerciales.length === 0) {
+                lista.innerHTML = '<p style="text-align:center;color:#9ca3af;">No hay comerciales con visitas.</p>';
+            } else {
+                lista.innerHTML = comerciales.map((c, i) => `
+                    <div class="comercial-row">
+                        <div class="comercial-info"><div class="name">${c.nombre}</div><div class="count">${c.email} - ${c.count} visita(s)</div></div>
+                        <div class="comercial-actions">
+                            <button class="btn btn-sm btn-email" onclick="window.location.href='${getMailtoComercial(c)}'">Correo</button>
+                            <button class="btn btn-sm btn-gchat" onclick="copiarMensaje(${i})">Copiar Chat</button>
+                            <span class="copied-toast" id="copied-${i}">Copiado</span>
+                        </div>
+                    </div>`).join('');
+            }
+            document.getElementById('modal-notificar').classList.add('active');
+        }
+
+        function cerrarModalNotificar() { document.getElementById('modal-notificar').classList.remove('active'); }
+
+        function copiarMensaje(i) {
+            const msg = getMensajeComercial(getComerciales()[i]);
+            navigator.clipboard.writeText(msg).then(() => {
+                const b = document.getElementById('copied-' + i); b.style.display = 'inline'; setTimeout(() => b.style.display = 'none', 2000);
+            });
+        }
+
+        function notificarTodos() {
+            const comerciales = getComerciales();
+            if (!comerciales.length) return;
+            const emails = comerciales.map(c => c.email).join(',');
+            const asunto = `Tienes visitas 360 agendadas para mañana ${FECHA_MANANA}`;
+            const cuerpo = `Hola Masterkey, tienes visitas 360 agendadas para mañana ${FECHA_MANANA}. Ingresa en el siguiente link y escríbeles para confirmar la visita:\n\n${PAGE_URL}\n\nUtiliza los botones de WhatsApp para escribirles y usa los botones de Confirmar y Cancelar para informar a Remo.`;
+            window.location.href = `mailto:${emails}?subject=${encodeURIComponent(asunto)}&body=${encodeURIComponent(cuerpo)}`;
+        }
+        // ==========================
+        // TAB 3: POR PUBLICAR
+        // ==========================
+        let porPublicar = [];
+        let publicarLoaded = false;
+        let pubStatusMap = JSON.parse(localStorage.getItem('pubStatusMap') || '{}');  // nid -> {status, comentario}
+
+        document.getElementById('search-pub').addEventListener('input', renderPorPublicar);
+        document.getElementById('filter-equipo-pub').addEventListener('change', renderPorPublicar);
+        document.getElementById('filter-comercial-pub').addEventListener('change', renderPorPublicar);
+        document.getElementById('filter-estado-pub').addEventListener('change', renderPorPublicar);
+
+        function savePubState() {
+            localStorage.setItem('pubStatusMap', JSON.stringify(pubStatusMap));
+        }
+
+        async function fetchPorPublicar() {
+            try {
+                const res = await fetch('/api/por-publicar');
+                porPublicar = await res.json();
+                publicarLoaded = true;
+                document.getElementById('loading-pub').style.display = 'none';
+                if (porPublicar.length === 0) {
+                    document.getElementById('empty-pub').style.display = 'block';
+                } else {
+                    document.getElementById('table-pub-container').style.display = 'block';
+                    buildFilterOptions(porPublicar, 'filter-equipo-pub', 'equipo');
+                    buildFilterOptions(porPublicar, 'filter-comercial-pub', 'comercial');
+                    renderPorPublicar();
+                }
+            } catch (err) {
+                document.getElementById('loading-pub').innerHTML = '<p style="color:#ef4444;">Error al cargar inmuebles.</p>';
+            }
+        }
+
+        function getFilteredPub() {
+            const search = document.getElementById('search-pub').value.toLowerCase();
+            const ef = document.getElementById('filter-equipo-pub').value;
+            const cf = document.getElementById('filter-comercial-pub').value;
+            const sf = document.getElementById('filter-estado-pub').value;
+            return porPublicar.filter(v => {
+                const ms = !search || v.nid.includes(search) || v.ciudad.toLowerCase().includes(search) || v.comercial.toLowerCase().includes(search) || v.estado_actual.toLowerCase().includes(search);
+                const ps = pubStatusMap[v.nid]?.status || 'pendiente';
+                return ms && (ef === 'todos' || v.equipo === ef) && (cf === 'todos' || v.comercial === cf) && (sf === 'todos' || ps === sf);
+            });
+        }
+
+        function renderPorPublicar() {
+            const tbody = document.getElementById('tbody-pub');
+            const filtered = getFilteredPub();
+
+            tbody.innerHTML = filtered.map(v => {
+                const ps = pubStatusMap[v.nid] || {};
+                const bgColor = ps.status === 'publicado' ? '#f0fdf4' : ps.status === 'no_publicado' ? '#fef2f2' : 'white';
+                return `
+                <tr style="border-bottom:1px solid #e5e7eb;background:${bgColor};">
+                    <td style="padding:10px 16px;font-weight:600;font-size:13px;">${v.nid}</td>
+                    <td style="padding:10px 16px;font-size:13px;">${v.comercial || 'N/A'}</td>
+                    <td style="padding:10px 16px;font-size:13px;">${v.equipo || 'N/A'}</td>
+                    <td style="padding:10px 16px;font-size:13px;">${v.ciudad || 'N/A'}</td>
+                    <td style="padding:10px 16px;font-size:13px;">${v.fecha_recorrido || 'Sin 360'}</td>
+                    <td style="padding:10px 16px;font-size:12px;">${v.estado_actual || 'N/A'}</td>
+                    <td style="padding:10px 16px;font-size:12px;">${v.link_publicacion ? `<a href="${v.link_publicacion}" target="_blank" style="color:#8b5cf6;font-weight:600;">Ver</a>` : '<span style="color:#9ca3af;">-</span>'}</td>
+                    <td style="padding:10px 16px;white-space:nowrap;">
+                        <button class="btn btn-sm ${ps.status === 'publicado' ? 'btn-confirmar' : ''}" style="${ps.status !== 'publicado' ? 'background:#e5e7eb;color:#374151;' : ''}padding:5px 10px;font-size:11px;" onclick="togglePubStatus('${v.nid}','publicado')">Publicado</button>
+                        <button class="btn btn-sm ${ps.status === 'no_publicado' ? 'btn-cancelar' : ''}" style="${ps.status !== 'no_publicado' ? 'background:#e5e7eb;color:#374151;' : ''}padding:5px 10px;font-size:11px;" onclick="togglePubStatus('${v.nid}','no_publicado')">No publicado</button>
+                    </td>
+                    <td style="padding:10px 16px;">
+                        <input type="text" value="${ps.comentario || ''}" placeholder="Comentario..." onblur="guardarComentario('${v.nid}', this.value)"
+                            style="width:180px;padding:5px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;outline:none;">
+                    </td>
+                </tr>`;
+            }).join('');
+
+            // Stats
+            const total = porPublicar.length;
+            let pub = 0, nopub = 0;
+            porPublicar.forEach(v => {
+                const s = pubStatusMap[v.nid]?.status;
+                if (s === 'publicado') pub++;
+                if (s === 'no_publicado') nopub++;
+            });
+            document.getElementById('stat-pub-total').textContent = total;
+            document.getElementById('stat-pub-publicados').textContent = pub;
+            document.getElementById('stat-pub-nopub').textContent = nopub;
+            document.getElementById('stat-pub-pendientes').textContent = total - pub - nopub;
+        }
+
+        function togglePubStatus(nid, status) {
+            if (!pubStatusMap[nid]) pubStatusMap[nid] = {};
+            if (pubStatusMap[nid].status === status) {
+                delete pubStatusMap[nid].status;
+            } else {
+                pubStatusMap[nid].status = status;
+            }
+            savePubState();
+            renderPorPublicar();
+        }
+
+        function guardarComentario(nid, comentario) {
+            if (!pubStatusMap[nid]) pubStatusMap[nid] = {};
+            pubStatusMap[nid].comentario = comentario;
+            savePubState();
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,7 @@
+__pycache__
+*.pyc
+ngrok*
+*.zip
+notificar.py
+notificar.bat
+notificar.log
