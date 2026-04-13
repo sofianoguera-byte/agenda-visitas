@@ -1,5 +1,6 @@
 from flask import Flask, render_template, jsonify, request
 from google.cloud import bigquery
+from google.oauth2 import credentials as oauth2_credentials
 from datetime import datetime, timedelta
 from urllib.parse import quote
 import imaplib
@@ -7,10 +8,21 @@ import email as email_lib
 import re
 import csv
 import io
+import json
+import os
+import tempfile
 import requests as http_requests
 from bs4 import BeautifulSoup
 
 app = Flask(__name__)
+
+# En producción (Render), usa credenciales desde variable de entorno
+creds_json = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS_JSON")
+if creds_json:
+    creds_path = os.path.join(tempfile.gettempdir(), "gcloud_creds.json")
+    with open(creds_path, "w") as f:
+        f.write(creds_json)
+    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = creds_path
 
 client = bigquery.Client(project="papyrus-data")
 
