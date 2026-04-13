@@ -411,7 +411,7 @@ def api_por_publicar():
       LEFT JOIN `papyrus-data.habi_brokers_listing.property_card` pc ON cd.nid = pc.nid
       LEFT JOIN `papyrus-delivery-data.inmobiliaria.detalle_estado_captaciones` d ON cd.nid = d.nid
       LEFT JOIN `papyrus-master.squad_bi_global.hubspot_deal` h ON SAFE_CAST(cd.nid AS INT64) = h.nid AND h.pipeline = '803674753'
-      WHERE cd.fecha_desistio_inmobiliaria IS NULL AND h.fecha_desistio_inmobiliaria IS NULL AND d.date_publication IS NULL AND dealstage != '1182117639'
+      WHERE cd.fecha_desistio_inmobiliaria IS NULL AND h.fecha_desistio_inmobiliaria IS NULL AND dealstage != '1182117639'
     ),
     base_unica AS (
       SELECT *, ROW_NUMBER() OVER (PARTITION BY nid ORDER BY Fecha_recorrido DESC NULLS LAST) AS rn FROM base
@@ -455,7 +455,6 @@ def api_por_publicar():
             SELECT CAST(nid AS STRING) AS nid, c_comercial_captacion, ciudad, c_equipo_seller
             FROM `papyrus-data.habi_wh_inmobiliaria.consolidado_habi_inmobiliaria`
             WHERE CAST(nid AS STRING) IN ({nids_str})
-            AND date_publication IS NULL
             """
             try:
                 for row in client.query(q_extra).result():
