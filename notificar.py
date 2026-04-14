@@ -92,58 +92,84 @@ def notificar_visitas_manana():
 
 
 def notificar_canceladas_reagendar():
-    """Notifica a comerciales sobre TODAS las visitas canceladas sin reagendar."""
-    print(f"\n[{datetime.now()}] === CANCELADAS POR REAGENDAR (todas) ===")
+    """Notifica solo si hubo cancelaciones nuevas ayer. Incluye resumen de pendientes de la semana."""
+    ayer = get_fecha_ayer()
+    hace_7_dias = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
+    print(f"\n[{datetime.now()}] === CANCELADAS POR REAGENDAR (nuevas de {ayer} + pendientes semana) ===")
 
-    query = """
+    query = f"""
     WITH ultimo_registro AS (
-        SELECT nid, status, fecha_inicio, nombre_agendador, email_agendador,
+        SELECT nid, status, fecha_inicio, modified_date, nombre_agendador, email_agendador,
             ROW_NUMBER() OVER (PARTITION BY nid ORDER BY modified_date DESC) AS rn
         FROM `papyrus-master.bubble_gold.mart_bubble_schedule_co`
         WHERE nid != 'nan' AND nid IS NOT NULL
             AND visit_type = 'Habi Inmobiliaria'
     ),
     canceladas AS (
-        SELECT nid, fecha_inicio AS fecha_agendada, nombre_agendador, email_agendador, status
+        SELECT nid, fecha_inicio AS fecha_agendada, modified_date, nombre_agendador, email_agendador, status
         FROM ultimo_registro
         WHERE rn = 1 AND status IN ('Cancelado', 'No realizada')
     )
-    SELECT v.*, c.c_comercial_captacion
+    SELECT v.*, c.c_comercial_captacion,
+        CASE WHEN v.modified_date LIKE '{ayer}%' THEN 'nueva' ELSE 'pendiente' END AS tipo
     FROM canceladas v
     LEFT JOIN `papyrus-data.habi_wh_inmobiliaria.consolidado_habi_inmobiliaria` c
         ON v.nid = CAST(c.nid AS STRING)
+    WHERE v.modified_date >= '{hace_7_dias}'
     """
     results = client.query(query).result()
 
     mapa = {}
+    hay_nuevas_global = False
     for row in results:
         email = row.c_comercial_captacion or row.email_agendador or ""
         if not email or email == "nan":
             continue
         if email not in mapa:
-            mapa[email] = {"email": email, "nombre": row.nombre_agendador or email, "nids": []}
+            mapa[email] = {"email": email, "nombre": row.nombre_agendador or email, "nuevas": [], "pendientes": []}
         fecha_ag = str(row.fecha_agendada).split("T")[0] if row.fecha_agendada else ""
-        mapa[email]["nids"].append({"nid": str(row.nid), "fecha": fecha_ag})
+        entry = {"nid": str(row.nid), "fecha": fecha_ag}
+        if row.tipo == "nueva":
+            mapa[email]["nuevas"].append(entry)
+            hay_nuevas_global = True
+        else:
+            mapa[email]["pendientes"].append(entry)
 
-    comerciales = list(mapa.values())
-    total_nids = sum(len(c["nids"]) for c in comerciales)
-    print(f"Encontradas {total_nids} canceladas para {len(comerciales)} comerciales")
+    if not hay_nuevas_global:
+        print("No hubo cancelaciones nuevas ayer. No se envian correos.")
+        return
+
+    # Solo enviar a comerciales que tengan al menos 1 nueva
+    comerciales = [c for c in mapa.values() if c["nuevas"]]
+    print(f"Comerciales con cancelaciones nuevas: {len(comerciales)}")
 
     for c in comerciales:
-        nids_list = "\n".join(f"  - NID {n['nid']} (agendado para {n['fecha']})" for n in c["nids"])
-        asunto = f"Tienes {len(c['nids'])} visita(s) cancelada(s) por reagendar"
+        nuevas_list = "\n".join(f"  - NID {n['nid']} (estaba agendado para {n['fecha']})" for n in c["nuevas"])
+
         cuerpo = (
             f"Hola {c['nombre']},\n\n"
-            f"Las siguientes visitas fueron canceladas y necesitan ser reagendadas:\n\n"
-            f"{nids_list}\n\n"
-            f"Ingresa en el siguiente link, ve a la pestana 'Canceladas por Reagendar' "
-            f"y contacta a los propietarios para reagendar:\n"
+            f"Las siguientes visitas que tenias agendadas para ayer fueron canceladas, reagendalas:\n\n"
+            f"{nuevas_list}\n\n"
+        )
+
+        if c["pendientes"]:
+            pendientes_list = "\n".join(f"  - NID {n['nid']} (agendado para {n['fecha']})" for n in c["pendientes"])
+            cuerpo += (
+                f"Ademas, tienes estas canceladas de la semana pendientes por reagendar:\n\n"
+                f"{pendientes_list}\n\n"
+            )
+
+        cuerpo += (
+            f"Ingresa aqui para gestionarlas:\n"
             f"{PAGE_URL}\n\n"
             f"Saludos,\nEquipo Habi"
         )
+
+        asunto = f"Visita(s) cancelada(s) ayer - Reagendar ({len(c['nuevas'])} nueva(s))"
+
         try:
             enviar_correo(c["email"], asunto, cuerpo)
-            print(f"  Correo enviado a {c['email']} ({len(c['nids'])} canceladas)")
+            print(f"  Correo enviado a {c['email']} ({len(c['nuevas'])} nuevas, {len(c['pendientes'])} pendientes)")
         except Exception as e:
             print(f"  ERROR enviando a {c['email']}: {e}")
 

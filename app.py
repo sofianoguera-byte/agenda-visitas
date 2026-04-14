@@ -231,18 +231,23 @@ def leer_canceladas_correo(dias=7):
         # 1. Solo mantener NIDs cuyo último registro en bubble sea Cancelado o No realizada
         query_status = f"""
         WITH ultimo AS (
-            SELECT nid, status,
+            SELECT nid, status, modified_date,
                 ROW_NUMBER() OVER (PARTITION BY nid ORDER BY modified_date DESC) AS rn
             FROM `papyrus-master.bubble_gold.mart_bubble_schedule_co`
             WHERE nid IN ({nids_str}) AND visit_type = 'Habi Inmobiliaria'
         )
-        SELECT nid, status FROM ultimo WHERE rn = 1
+        SELECT nid, status, modified_date FROM ultimo WHERE rn = 1
         """
         nids_realmente_cancelados = set()
+        nids_modified = {}
         try:
             for row in client.query(query_status).result():
                 if row.status in ("Cancelado", "No realizada"):
                     nids_realmente_cancelados.add(str(row.nid))
+                mod = str(row.modified_date) if row.modified_date else ""
+                if mod and "T" in mod:
+                    mod = mod.split("T")[0]
+                nids_modified[str(row.nid)] = mod
         except Exception as e:
             print(f"Error verificando status: {e}")
 
@@ -314,6 +319,7 @@ def leer_canceladas_correo(dias=7):
                 "fecha_reporte": n["fecha_reporte"],
                 "fecha_agendada": fecha_agendada,
                 "equipo": bq.get("equipo", ""),
+                "ultima_actualizacion": nids_modified.get(n["nid"], ""),
             })
 
         return resultado, fechas_reporte

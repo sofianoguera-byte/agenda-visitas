@@ -554,7 +554,11 @@
                     const contacted = whatsappMap[v.nid];
                     return `
                     <div class="visita-card reagendar ${contacted ? 'confirmada' : ''}">
-                        ${contacted ? '<span style="position:absolute;top:16px;right:16px;background:#d1fae5;color:#065f46;padding:4px 10px;border-radius:20px;font-size:11px;font-weight:700;">Contactado</span>' : ''}
+                        <div style="position:absolute;top:16px;right:16px;display:flex;gap:6px;">
+                            ${contacted ? '<span style="background:#d1fae5;color:#065f46;padding:4px 10px;border-radius:20px;font-size:11px;font-weight:700;">Contactado</span>' : ''}
+                            ${cancelContactMap[v.nid] === 'agendado' ? '<span style="background:#dbeafe;color:#1e40af;padding:4px 10px;border-radius:20px;font-size:11px;font-weight:700;">Agendado</span>' : ''}
+                            ${cancelContactMap[v.nid] === true && !whatsappMap[v.nid] ? '<span style="background:#fee2e2;color:#991b1b;padding:4px 10px;border-radius:20px;font-size:11px;font-weight:700;">Desistido</span>' : ''}
+                        </div>
                         <div class="card-header">
                             <span class="nid-badge">NID ${v.nid}</span>
                             <span class="status-pill cancelado">Cancelada</span>
@@ -566,15 +570,16 @@
                             <div class="field"><label>Fotógrafo</label><span>${v.fotografo || 'N/A'}</span></div>
                             <div class="field"><label>Teléfono Cliente</label><span>${v.telefono_cliente || 'Sin teléfono'}</span></div>
                             <div class="field"><label>Reporte del</label><span>${v.fecha_reporte || 'N/A'}</span></div>
+                            <div class="field"><label>Última actualización</label><span>${v.ultima_actualizacion || 'N/A'}</span></div>
                             <div class="field full-width"><label>Motivo cancelación</label><span style="color:#991b1b;">${v.motivo_cancelacion || 'N/A'}</span></div>
                             ${v.direccion ? `<div class="field full-width"><label>Dirección</label><span>${v.direccion}</span></div>` : ''}
                         </div>
                         <div class="card-actions">
                             ${phone ? `
-                                <a href="tel:+${phone}" class="btn btn-call">&#x1f4de; Llamar</a>
                                 <a href="https://wa.me/${phone}?text=${getWhatsAppReagendar(v)}" target="_blank" class="btn btn-whatsapp" onclick="marcarWhatsAppCancel('${v.nid}')">&#x1f4ac; WhatsApp Reagendar</a>
                             ` : `<span class="btn btn-call" style="opacity:0.4;cursor:default;">&#x1f4de; Sin teléfono</span>`}
                             <a href="https://visitahabi.bubbleapps.io/home_algoritmo" target="_blank" class="btn btn-confirmar">&#x1f4c5; Reagendar</a>
+                            <button class="btn btn-sm" style="background:#3b82f6;" onclick="marcarAgendado('${v.nid}')">&#x2705; Ya se agendó/realizó</button>
                             <button class="btn btn-cancelar" onclick="abrirModalDesistir('${v.nid}')">&#x1f6ab; Quiere desistir</button>
                         </div>
                     </div>`;
@@ -587,6 +592,13 @@
             document.getElementById('stat-cancel-contactados').textContent = cont;
             document.getElementById('stat-cancel-pendientes').textContent = total - cont;
             document.getElementById('stat-fecha-reporte').textContent = fechasReporte.length ? fechasReporte.join(', ') : '-';
+        }
+
+        function marcarAgendado(nid) {
+            cancelContactMap[nid] = 'agendado';
+            saveState();
+            renderCanceladas();
+            showToast('NID ' + nid + ' marcado como agendado/realizado', 'success');
         }
 
         function marcarWhatsAppCancel(nid) {
