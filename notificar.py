@@ -94,8 +94,8 @@ def notificar_visitas_manana():
 def notificar_canceladas_reagendar():
     """Notifica solo si hubo cancelaciones nuevas ayer. Incluye resumen de pendientes de la semana."""
     ayer = get_fecha_ayer()
-    hace_7_dias = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
-    print(f"\n[{datetime.now()}] === CANCELADAS POR REAGENDAR (nuevas de {ayer} + pendientes semana) ===")
+    primer_dia_mes = datetime.now().strftime("%Y-%m-01")
+    print(f"\n[{datetime.now()}] === CANCELADAS POR REAGENDAR (nuevas de {ayer} + pendientes del mes) ===")
 
     query = f"""
     WITH ultimo_registro AS (
@@ -115,7 +115,7 @@ def notificar_canceladas_reagendar():
     FROM canceladas v
     LEFT JOIN `papyrus-data.habi_wh_inmobiliaria.consolidado_habi_inmobiliaria` c
         ON v.nid = CAST(c.nid AS STRING)
-    WHERE v.modified_date >= '{hace_7_dias}'
+    WHERE v.modified_date >= '{primer_dia_mes}'
     """
     results = client.query(query).result()
 
