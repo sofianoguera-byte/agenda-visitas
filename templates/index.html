@@ -194,6 +194,7 @@
                     <option value="publicado">Publicados</option>
                     <option value="no_publicado">No publicados</option>
                 </select>
+                <button class="btn" style="background:#6c3baa;font-size:13px;" onclick="descargarCSV()">Descargar CSV</button>
             </div>
             <div id="loading-pub" class="loading"><div class="spinner"></div><p>Cargando inmuebles por publicar...</p></div>
             <div id="table-pub-container" style="display:none;overflow-x:auto;">
@@ -799,6 +800,23 @@
             }
             savePubState();
             renderPorPublicar();
+        }
+
+        function descargarCSV() {
+            const filtered = getFilteredPub();
+            const headers = ['NID','Comercial','Equipo','Ciudad','Fecha 360','Estado Actual','Link Publicacion','Estado','Comentario'];
+            const rows = filtered.map(v => {
+                const ps = pubStatusMap[v.nid] || {};
+                return [v.nid, v.comercial, v.equipo, v.ciudad, v.fecha_recorrido, v.estado_actual, v.link_publicacion, ps.status || 'pendiente', ps.comentario || ''].map(c => '"' + (c || '').replace(/"/g, '""') + '"').join(',');
+            });
+            const csv = [headers.join(','), ...rows].join('\n');
+            const blob = new Blob(['\ufeff' + csv], {type: 'text/csv;charset=utf-8;'});
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'por_publicar_' + new Date().toISOString().split('T')[0] + '.csv';
+            a.click();
+            URL.revokeObjectURL(url);
         }
 
         function guardarComentario(nid, comentario) {
