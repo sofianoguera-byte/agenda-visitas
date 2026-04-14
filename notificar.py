@@ -8,7 +8,7 @@ import os
 # Configuración
 SMTP_USER = os.environ.get("SMTP_USER", "sofianoguera@habi.co")
 SMTP_PASS = os.environ.get("SMTP_PASS", "ujst tpuv fazx pjtu")
-PAGE_URL = "http://localhost:5000"
+PAGE_URL = "https://agenda-visitas-wcdm.onrender.com"
 
 client = bigquery.Client(project="papyrus-data")
 
