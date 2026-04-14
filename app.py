@@ -420,7 +420,7 @@ def api_por_publicar():
       LEFT JOIN `papyrus-data.habi_brokers_listing.property_card` pc ON cd.nid = pc.nid
       LEFT JOIN `papyrus-delivery-data.inmobiliaria.detalle_estado_captaciones` d ON cd.nid = d.nid
       LEFT JOIN `papyrus-master.squad_bi_global.hubspot_deal` h ON SAFE_CAST(cd.nid AS INT64) = h.nid AND h.pipeline = '803674753'
-      LEFT JOIN `papyrus-data.habi_brokers_listing.property_image` pi ON cd.nid = pi.nid
+      LEFT JOIN `papyrus-data.habi_brokers_listing.property_image` pi ON pc.id = pi.property_card_id
       WHERE cd.fecha_desistio_inmobiliaria IS NULL AND h.fecha_desistio_inmobiliaria IS NULL AND dealstage != '1182117639'
         AND (d.date_publication IS NULL OR pi.source_image_id = 3)
     ),
