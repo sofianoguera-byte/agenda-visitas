@@ -458,9 +458,13 @@ def api_por_publicar():
         if nids_nuevos:
             nids_str = ",".join(f"'{n}'" for n in nids_nuevos)
             q_extra = f"""
-            SELECT CAST(nid AS STRING) AS nid, c_comercial_captacion, ciudad, c_equipo_seller
-            FROM `papyrus-data.habi_wh_inmobiliaria.consolidado_habi_inmobiliaria`
-            WHERE CAST(nid AS STRING) IN ({nids_str})
+            SELECT CAST(cd.nid AS STRING) AS nid, cd.c_comercial_captacion, cd.ciudad, cd.c_equipo_seller
+            FROM `papyrus-data.habi_wh_inmobiliaria.consolidado_habi_inmobiliaria` cd
+            LEFT JOIN `papyrus-delivery-data.inmobiliaria.detalle_estado_captaciones` d ON cd.nid = d.nid
+            WHERE CAST(cd.nid AS STRING) IN ({nids_str})
+              AND cd.date_publication IS NULL
+              AND cd.fecha_desistio_inmobiliaria IS NULL
+              AND (d.estado_patrimonio IS NULL OR d.estado_patrimonio IN ('Sin patrimonio', 'Patrimonio levantado'))
             """
             try:
                 for row in client.query(q_extra).result():
