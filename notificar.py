@@ -174,11 +174,113 @@ def notificar_canceladas_reagendar():
             print(f"  ERROR enviando a {c['email']}: {e}")
 
 
-def main():
+def resumen_maria_jose():
+    """Envía resumen a María José con visitas confirmadas, sin confirmar y canceladas."""
+    import json as json_lib
+
+    fecha = get_fecha_manana()
+    print(f"\n[{datetime.now()}] === RESUMEN PARA MARIA JOSE ({fecha}) ===")
+
+    # Cargar estados guardados
+    estados_file = os.path.join(os.path.dirname(__file__), "estados_visitas.json")
+    try:
+        with open(estados_file, "r") as f:
+            todos_estados = json_lib.load(f)
+    except (FileNotFoundError, json_lib.JSONDecodeError):
+        todos_estados = {}
+
+    estados = todos_estados.get(fecha, {})
+
+    # Obtener visitas de mañana
+    query = f"""
+    WITH visitas_manana AS (
+        SELECT *,
+            ROW_NUMBER() OVER (PARTITION BY nid ORDER BY modified_date DESC) AS rn
+        FROM `papyrus-master.bubble_gold.mart_bubble_schedule_co`
+        WHERE nid != 'nan' AND nid IS NOT NULL
+            AND visit_type = 'Habi Inmobiliaria'
+            AND status = 'Agendado'
+            AND fecha_fin LIKE '{fecha}%'
+    )
+    SELECT v.nid, v.ciudad_muni, v.nombre_agendador, c.c_comercial_captacion
+    FROM visitas_manana v
+    LEFT JOIN `papyrus-data.habi_wh_inmobiliaria.consolidado_habi_inmobiliaria` c
+        ON v.nid = CAST(c.nid AS STRING)
+    WHERE v.rn = 1
+    """
+    results = client.query(query).result()
+
+    confirmadas = []
+    sin_confirmar = []
+    canceladas = []
+
+    for row in results:
+        nid = str(row.nid)
+        comercial = row.c_comercial_captacion or row.nombre_agendador or ""
+        ciudad = row.ciudad_muni or ""
+        estado = estados.get(nid, "")
+
+        entry = f"NID {nid} - {ciudad} - {comercial}"
+
+        if estado == "confirmada":
+            confirmadas.append(entry)
+        elif estado == "cancelada":
+            canceladas.append(entry)
+        else:
+            sin_confirmar.append(entry)
+
+    total = len(confirmadas) + len(sin_confirmar) + len(canceladas)
+    print(f"Total: {total} | Confirmadas: {len(confirmadas)} | Sin confirmar: {len(sin_confirmar)} | Canceladas: {len(canceladas)}")
+
+    # Armar correo
+    cuerpo = f"Hola Maria Jose,\n\nResumen de visitas 360 agendadas para manana {fecha}:\n\n"
+    cuerpo += f"Total: {total} visitas\n\n"
+
+    cuerpo += f"--- CONFIRMADAS ({len(confirmadas)}) ---\n"
+    if confirmadas:
+        cuerpo += "\n".join(f"  {e}" for e in confirmadas) + "\n\n"
+    else:
+        cuerpo += "  Ninguna\n\n"
+
+    cuerpo += f"--- SIN CONFIRMAR ({len(sin_confirmar)}) ---\n"
+    if sin_confirmar:
+        cuerpo += "\n".join(f"  {e}" for e in sin_confirmar) + "\n\n"
+    else:
+        cuerpo += "  Ninguna\n\n"
+
+    cuerpo += f"--- CANCELADAS ({len(canceladas)}) ---\n"
+    if canceladas:
+        cuerpo += "\n".join(f"  {e}" for e in canceladas) + "\n\n"
+    else:
+        cuerpo += "  Ninguna\n\n"
+
+    cuerpo += f"Saludos,\nEquipo Habi"
+
+    asunto = f"Resumen visitas 360 para manana {fecha} - {len(confirmadas)} confirmadas, {len(canceladas)} canceladas"
+
+    try:
+        enviar_correo("mariaalonso@habi.co", asunto, cuerpo)
+        print("  Correo enviado a mariaalonso@habi.co")
+    except Exception as e:
+        print(f"  ERROR enviando a mariaalonso@habi.co: {e}")
+
+
+def main_9am():
+    """Se ejecuta a las 9 AM."""
     notificar_visitas_manana()
     notificar_canceladas_reagendar()
-    print(f"\n[{datetime.now()}] Proceso completado.")
+    print(f"\n[{datetime.now()}] Proceso 9 AM completado.")
+
+
+def main_5pm():
+    """Se ejecuta a las 5 PM."""
+    resumen_maria_jose()
+    print(f"\n[{datetime.now()}] Proceso 5 PM completado.")
 
 
 if __name__ == "__main__":
-    main()
+    import sys
+    if len(sys.argv) > 1 and sys.argv[1] == "5pm":
+        main_5pm()
+    else:
+        main_9am()

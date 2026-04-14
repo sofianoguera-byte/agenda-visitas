@@ -519,8 +519,52 @@ def cancelar_visita():
     return jsonify({"status": "ok", "mailto_url": mailto_url, "gmail_url": gmail_url})
 
 
+ESTADOS_FILE = os.path.join(os.path.dirname(__file__), "estados_visitas.json")
+
+
+def cargar_estados():
+    try:
+        with open(ESTADOS_FILE, "r") as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+
+def guardar_estados(estados):
+    with open(ESTADOS_FILE, "w") as f:
+        json.dump(estados, f)
+
+
+@app.route("/api/estado", methods=["POST"])
+def guardar_estado_visita():
+    """Guarda el estado de una visita (confirmada/cancelada)."""
+    data = request.json
+    nid = data.get("nid", "")
+    estado = data.get("estado", "")  # confirmada, cancelada, o vacío para limpiar
+    fecha = get_fecha_manana()
+
+    estados = cargar_estados()
+    if fecha not in estados:
+        estados[fecha] = {}
+
+    if estado:
+        estados[fecha][nid] = estado
+    elif nid in estados.get(fecha, {}):
+        del estados[fecha][nid]
+
+    guardar_estados(estados)
+    return jsonify({"status": "ok"})
+
+
+@app.route("/api/estados")
+def obtener_estados():
+    """Devuelve los estados guardados para mañana."""
+    fecha = get_fecha_manana()
+    estados = cargar_estados()
+    return jsonify(estados.get(fecha, {}))
+
+
 if __name__ == "__main__":
-    import os
     port = int(os.environ.get("PORT", 5000))
     debug = os.environ.get("ENV") != "production"
     app.run(debug=debug, host="0.0.0.0", port=port)

@@ -432,10 +432,12 @@
         function toggleStatus(nid, newStatus) {
             if (statusMap[nid] === newStatus) {
                 delete statusMap[nid];
+                fetch('/api/estado', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({nid, estado:''})});
                 saveState(); renderCards();
                 showToast('NID ' + nid + ' vuelto a pendiente', 'info');
             } else {
                 statusMap[nid] = newStatus;
+                fetch('/api/estado', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({nid, estado: newStatus})});
                 saveState(); renderCards();
                 showToast('NID ' + nid + ' marcado como ' + newStatus, 'success');
             }
@@ -457,6 +459,7 @@
                 const data = await res.json();
                 window.open(data.gmail_url, '_blank');
                 statusMap[nid] = 'cancelada';
+                fetch('/api/estado', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({nid, estado:'cancelada'})});
                 // Agregar a canceladas para reagendar
                 const nuevaCancelada = {
                     nid: visita.nid,
