@@ -417,7 +417,9 @@ def api_por_publicar():
       LEFT JOIN `papyrus-data.habi_brokers_listing.property_card` pc ON cd.nid = pc.nid
       LEFT JOIN `papyrus-delivery-data.inmobiliaria.detalle_estado_captaciones` d ON cd.nid = d.nid
       LEFT JOIN `papyrus-master.squad_bi_global.hubspot_deal` h ON SAFE_CAST(cd.nid AS INT64) = h.nid AND h.pipeline = '803674753'
-      WHERE cd.fecha_desistio_inmobiliaria IS NULL AND h.fecha_desistio_inmobiliaria IS NULL AND d.date_publication IS NULL AND dealstage != '1182117639'
+      LEFT JOIN `papyrus-data.habi_brokers_listing.property_image` pi ON cd.nid = pi.nid
+      WHERE cd.fecha_desistio_inmobiliaria IS NULL AND h.fecha_desistio_inmobiliaria IS NULL AND dealstage != '1182117639'
+        AND (d.date_publication IS NULL OR pi.source_image_id = 3)
     ),
     base_unica AS (
       SELECT *, ROW_NUMBER() OVER (PARTITION BY nid ORDER BY Fecha_recorrido DESC NULLS LAST) AS rn FROM base
@@ -462,9 +464,12 @@ def api_por_publicar():
             FROM `papyrus-data.habi_wh_inmobiliaria.consolidado_habi_inmobiliaria` cd
             LEFT JOIN `papyrus-delivery-data.inmobiliaria.detalle_estado_captaciones` d ON cd.nid = d.nid
             WHERE CAST(cd.nid AS STRING) IN ({nids_str})
-              AND cd.date_publication IS NULL
               AND cd.fecha_desistio_inmobiliaria IS NULL
               AND (d.estado_patrimonio IS NULL OR d.estado_patrimonio IN ('Sin patrimonio', 'Patrimonio levantado'))
+              AND (cd.date_publication IS NULL OR EXISTS (
+                SELECT 1 FROM `papyrus-data.habi_brokers_listing.property_image` pi
+                WHERE pi.nid = cd.nid AND pi.source_image_id = 3
+              ))
             """
             try:
                 for row in client.query(q_extra).result():
