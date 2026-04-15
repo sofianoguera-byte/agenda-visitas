@@ -28,7 +28,7 @@ client = bigquery.Client(project="papyrus-data")
 
 # Credenciales correo
 EMAIL_USER = "sofianoguera@habi.co"
-EMAIL_PASS = "ujst tpuv fazx pjtu"
+EMAIL_PASS = "nort eggi kzbc iotb"
 
 
 def get_fecha_manana():
