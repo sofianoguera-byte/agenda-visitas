@@ -69,7 +69,7 @@ def get_visitas_manana():
     visitas_manana AS (
         SELECT * FROM ultimo_registro
         WHERE rn = 1
-            AND status = 'Agendado'
+            AND status IN ('Agendado', 'Cerrado')
             AND fecha_fin LIKE '{tomorrow}%'
     )
     SELECT
