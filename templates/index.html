@@ -257,12 +257,38 @@
     <script>
         let visitas = [];
         let canceladas = [];
-        let statusMap = JSON.parse(localStorage.getItem('statusMap') || '{}');
+        const ESTADOS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbz0mAvpiwFYUMhZWwd6JxbUHVVh6EH-d8eiRqFRXmjIJaFh6xFPmz4-tWk5I8Ww-Wpe/exec';
+        const ESTADOS_CSV_URL = 'https://docs.google.com/spreadsheets/d/1rxvkkdcCnv6eoyRBMvGgjbiP2tiITE_mO7wpZDpoCOw/export?format=csv';
+
+        let statusMap = {};
         let cancelContactMap = JSON.parse(localStorage.getItem('cancelContactMap') || '{}');
         let canceladasManuales = JSON.parse(localStorage.getItem('canceladasManuales') || '[]');
 
+        // Cargar estados compartidos desde Google Sheet
+        async function cargarEstadosCompartidos() {
+            try {
+                const res = await fetch(ESTADOS_CSV_URL);
+                const text = await res.text();
+                const lines = text.split('\n');
+                for (let i = 1; i < lines.length; i++) {
+                    const cols = lines[i].split(',');
+                    if (cols.length >= 3 && cols[1].trim() === FECHA_MANANA) {
+                        statusMap[cols[0].trim()] = cols[2].trim();
+                    }
+                }
+            } catch (e) { console.error('Error cargando estados:', e); }
+        }
+
+        function guardarEstadoCompartido(nid, estado) {
+            fetch(ESTADOS_SCRIPT_URL, {
+                method: 'POST',
+                mode: 'no-cors',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({nid, fecha: FECHA_MANANA, estado})
+            });
+        }
+
         function saveState() {
-            localStorage.setItem('statusMap', JSON.stringify(statusMap));
             localStorage.setItem('cancelContactMap', JSON.stringify(cancelContactMap));
             localStorage.setItem('canceladasManuales', JSON.stringify(canceladasManuales));
             localStorage.setItem('whatsappMap', JSON.stringify(whatsappMap));
@@ -331,6 +357,7 @@
         // =====================
         async function fetchVisitas() {
             try {
+                await cargarEstadosCompartidos();
                 const params = new URLSearchParams(window.location.search);
                 const testParam = params.get('test') ? '?test=1' : '';
                 const res = await fetch('/api/visitas' + testParam);
@@ -432,13 +459,13 @@
         function toggleStatus(nid, newStatus) {
             if (statusMap[nid] === newStatus) {
                 delete statusMap[nid];
-                fetch('/api/estado', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({nid, estado:''})});
-                saveState(); renderCards();
+                guardarEstadoCompartido(nid, '');
+                renderCards();
                 showToast('NID ' + nid + ' vuelto a pendiente', 'info');
             } else {
                 statusMap[nid] = newStatus;
-                fetch('/api/estado', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({nid, estado: newStatus})});
-                saveState(); renderCards();
+                guardarEstadoCompartido(nid, newStatus);
+                renderCards();
                 showToast('NID ' + nid + ' marcado como ' + newStatus, 'success');
             }
         }
@@ -459,7 +486,7 @@
                 const data = await res.json();
                 window.open(data.gmail_url, '_blank');
                 statusMap[nid] = 'cancelada';
-                fetch('/api/estado', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({nid, estado:'cancelada'})});
+                guardarEstadoCompartido(nid, 'cancelada');
                 // Agregar a canceladas para reagendar
                 const nuevaCancelada = {
                     nid: visita.nid,

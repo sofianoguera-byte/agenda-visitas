@@ -4,6 +4,7 @@ from email.mime.multipart import MIMEMultipart
 from google.cloud import bigquery
 from datetime import datetime, timedelta
 import os
+import requests as http_requests
 
 # Configuración
 SMTP_USER = os.environ.get("SMTP_USER", "sofianoguera@habi.co")
@@ -176,20 +177,22 @@ def notificar_canceladas_reagendar():
 
 def resumen_maria_jose():
     """Envía resumen a María José con visitas confirmadas, sin confirmar y canceladas."""
-    import json as json_lib
-
     fecha = get_fecha_manana()
     print(f"\n[{datetime.now()}] === RESUMEN PARA MARIA JOSE ({fecha}) ===")
 
-    # Cargar estados guardados
-    estados_file = os.path.join(os.path.dirname(__file__), "estados_visitas.json")
+    # Cargar estados desde Google Sheet
+    import csv as csv_lib
+    import io as io_lib
+    estados = {}
     try:
-        with open(estados_file, "r") as f:
-            todos_estados = json_lib.load(f)
-    except (FileNotFoundError, json_lib.JSONDecodeError):
-        todos_estados = {}
-
-    estados = todos_estados.get(fecha, {})
+        r = http_requests.get("https://docs.google.com/spreadsheets/d/1rxvkkdcCnv6eoyRBMvGgjbiP2tiITE_mO7wpZDpoCOw/export?format=csv", timeout=15)
+        reader = csv_lib.reader(io_lib.StringIO(r.text))
+        next(reader, None)  # skip header
+        for row in reader:
+            if len(row) >= 3 and row[1].strip() == fecha:
+                estados[row[0].strip()] = row[2].strip()
+    except Exception as e:
+        print(f"Error leyendo estados del Sheet: {e}")
 
     # Obtener visitas de mañana
     query = f"""
