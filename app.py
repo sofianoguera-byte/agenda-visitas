@@ -392,47 +392,51 @@ def api_por_publicar():
     query = """
     WITH bubble_unica AS (
       SELECT * FROM (
-        SELECT b.*, ROW_NUMBER() OVER (
-          PARTITION BY b.nid ORDER BY
-            DATE(SAFE_CAST(NULLIF(b.fecha_inicio, 'nan') AS TIMESTAMP)) DESC NULLS LAST,
-            CASE WHEN b.status = 'Agendado' THEN 2 WHEN b.status = 'Finalizado' THEN 1
-                 WHEN b.status = 'Cancelado' THEN 3 WHEN b.status = 'No realizada' THEN 4
-                 WHEN b.status = 'En obra' THEN 5 ELSE 99 END,
-            DATE(SAFE_CAST(NULLIF(b.fecha_agendado, 'nan') AS TIMESTAMP)) DESC NULLS LAST
-        ) AS rn
+        SELECT b.*,
+          ROW_NUMBER() OVER (PARTITION BY b.nid ORDER BY b.modified_date DESC) AS rn
         FROM `papyrus-master.bubble_gold.mart_bubble_schedule_co` b
         WHERE b.visit_category = 'Habi Inmobiliaria'
       ) WHERE rn = 1
+    ),
+    tiene_fotos_cliente AS (
+      SELECT DISTINCT pc.nid
+      FROM `papyrus-data.habi_brokers_listing.property_card` pc
+      INNER JOIN `papyrus-data.habi_brokers_listing.property_image` pi
+        ON pc.id = pi.property_card_id
+      WHERE pi.source_image_id = 3
     ),
     base AS (
       SELECT cd.nid, cd.c_comercial_captacion, cd.ciudad, cd.c_equipo_seller,
         DATE(SAFE_CAST(NULLIF(b.fecha_inicio, 'nan') AS TIMESTAMP)) AS Fecha_recorrido,
         b.status,
-        CASE WHEN pc.id IS NULL THEN 'Sin cms' ELSE 'Con cms' END AS Tiene_ficha_CMS,
-        CASE WHEN LOWER(cd.tipo_de_grav_men) LIKE '%patrimonio de familia con hijos menores%' THEN 'Patrimonio de familia' ELSE 'Sin patrimonio' END AS Patrimonio_familia,
         d.estado_patrimonio,
-        d.estado_cms,
+        d.date_publication,
+        CASE WHEN pc.id IS NULL THEN 'Sin CMS' ELSE 'Con CMS' END AS ficha_cms,
         CASE WHEN DATE(SAFE_CAST(NULLIF(b.fecha_inicio, 'nan') AS TIMESTAMP)) < CURRENT_DATE()
              AND b.status NOT IN ('Cancelado', 'No realizada', 'En obra', 'Agendado')
-             THEN 'Con 360' ELSE 'Sin 360' END AS Visita_efectuada
+             THEN 'Con 360' ELSE 'Sin 360' END AS visita_efectuada,
+        CASE WHEN fc.nid IS NOT NULL THEN 'Fotos cliente' ELSE 'Sin fotos profesionales' END AS tipo_fotos
       FROM `papyrus-data.habi_wh_inmobiliaria.consolidado_habi_inmobiliaria` cd
       LEFT JOIN bubble_unica b ON CAST(cd.nid AS STRING) = b.nid
       LEFT JOIN `papyrus-data.habi_brokers_listing.property_card` pc ON cd.nid = pc.nid
       LEFT JOIN `papyrus-delivery-data.inmobiliaria.detalle_estado_captaciones` d ON cd.nid = d.nid
-      LEFT JOIN `papyrus-master.squad_bi_global.hubspot_deal` h ON SAFE_CAST(cd.nid AS INT64) = h.nid AND h.pipeline = '803674753'
-      LEFT JOIN `papyrus-data.habi_brokers_listing.property_image` pi ON pc.id = pi.property_card_id
-      WHERE cd.fecha_desistio_inmobiliaria IS NULL AND h.fecha_desistio_inmobiliaria IS NULL AND dealstage != '1182117639'
-        AND (d.date_publication IS NULL OR pi.source_image_id = 3)
+      LEFT JOIN `papyrus-master.squad_bi_global.hubspot_deal` h
+        ON SAFE_CAST(cd.nid AS INT64) = h.nid AND h.pipeline = '803674753'
+      LEFT JOIN tiene_fotos_cliente fc ON cd.nid = fc.nid
+      WHERE cd.fecha_desistio_inmobiliaria IS NULL
+        AND h.fecha_desistio_inmobiliaria IS NULL
+        AND dealstage != '1182117639'
+        AND d.estado_patrimonio IN ('Sin patrimonio', 'Patrimonio levantado')
+        AND (d.date_publication IS NULL OR fc.nid IS NOT NULL)
     ),
     base_unica AS (
       SELECT *, ROW_NUMBER() OVER (PARTITION BY nid ORDER BY Fecha_recorrido DESC NULLS LAST) AS rn FROM base
     )
     SELECT nid, c_comercial_captacion, ciudad, c_equipo_seller, Fecha_recorrido, status,
-      Tiene_ficha_CMS, Patrimonio_familia, estado_patrimonio, estado_cms, Visita_efectuada,
-      CONCAT(IFNULL(estado_patrimonio, ''), ', ', IFNULL(Tiene_ficha_CMS, estado_cms), ', ', Visita_efectuada) AS Estado_actual
+      estado_patrimonio, ficha_cms, visita_efectuada, tipo_fotos, date_publication,
+      CONCAT(IFNULL(estado_patrimonio, ''), ', ', ficha_cms, ', ', visita_efectuada, ', ', tipo_fotos) AS Estado_actual
     FROM base_unica WHERE rn = 1
-      AND Visita_efectuada = 'Con 360'
-      AND estado_patrimonio IN ('Sin patrimonio', 'Patrimonio levantado')
+      AND visita_efectuada = 'Con 360'
     ORDER BY Fecha_recorrido DESC
     """
     try:
@@ -448,12 +452,14 @@ def api_por_publicar():
                 "equipo": row.c_equipo_seller or "",
                 "fecha_recorrido": str(row.Fecha_recorrido) if row.Fecha_recorrido else "",
                 "status_bubble": row.status or "",
-                "ficha_cms": row.Tiene_ficha_CMS or "",
+                "ficha_cms": row.ficha_cms or "",
                 "patrimonio": row.estado_patrimonio or "",
-                "visita_360": row.Visita_efectuada or "",
+                "visita_360": row.visita_efectuada or "",
+                "tipo_fotos": row.tipo_fotos or "",
                 "estado_actual": row.Estado_actual or "",
                 "link_publicacion": links.get(nid, ""),
             })
+
         # Agregar NIDs del correo de cleaning (visitados "SI") que no estén en la lista
         nids_existentes = set(i["nid"] for i in inmuebles)
         completados = leer_completados_correo()
@@ -463,16 +469,21 @@ def api_por_publicar():
         if nids_nuevos:
             nids_str = ",".join(f"'{n}'" for n in nids_nuevos)
             q_extra = f"""
-            SELECT CAST(cd.nid AS STRING) AS nid, cd.c_comercial_captacion, cd.ciudad, cd.c_equipo_seller
+            SELECT CAST(cd.nid AS STRING) AS nid, cd.c_comercial_captacion, cd.ciudad, cd.c_equipo_seller,
+              d.estado_patrimonio
             FROM `papyrus-data.habi_wh_inmobiliaria.consolidado_habi_inmobiliaria` cd
             LEFT JOIN `papyrus-delivery-data.inmobiliaria.detalle_estado_captaciones` d ON cd.nid = d.nid
+            LEFT JOIN (
+              SELECT DISTINCT pc2.nid
+              FROM `papyrus-data.habi_brokers_listing.property_card` pc2
+              INNER JOIN `papyrus-data.habi_brokers_listing.property_image` pi2
+                ON pc2.id = pi2.property_card_id
+              WHERE pi2.source_image_id = 3
+            ) fc ON cd.nid = fc.nid
             WHERE CAST(cd.nid AS STRING) IN ({nids_str})
               AND cd.fecha_desistio_inmobiliaria IS NULL
               AND (d.estado_patrimonio IS NULL OR d.estado_patrimonio IN ('Sin patrimonio', 'Patrimonio levantado'))
-              AND (cd.date_publication IS NULL OR EXISTS (
-                SELECT 1 FROM `papyrus-data.habi_brokers_listing.property_image` pi
-                WHERE pi.nid = cd.nid AND pi.source_image_id = 3
-              ))
+              AND (d.date_publication IS NULL OR fc.nid IS NOT NULL)
             """
             try:
                 for row in client.query(q_extra).result():
@@ -486,8 +497,9 @@ def api_por_publicar():
                         "fecha_recorrido": completado.get("fecha_reporte", "Reciente (correo)"),
                         "status_bubble": "",
                         "ficha_cms": "",
-                        "patrimonio": "",
+                        "patrimonio": row.estado_patrimonio or "Por confirmar",
                         "visita_360": "Con 360",
+                        "tipo_fotos": "",
                         "estado_actual": f"Visitado {completado.get('fecha_reporte', '')} (correo)",
                         "link_publicacion": links.get(nid, ""),
                     })
