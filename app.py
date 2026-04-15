@@ -499,12 +499,20 @@ def api_por_publicar():
                         "ficha_cms": "",
                         "patrimonio": row.estado_patrimonio or "Por confirmar",
                         "visita_360": "Con 360",
-                        "tipo_fotos": "",
-                        "estado_actual": f"Visitado {completado.get('fecha_reporte', '')} (correo)",
+                        "tipo_fotos": "Con fotos profesionales",
+                        "estado_actual": f"Con fotos profesionales - Visitado {completado.get('fecha_reporte', '')} (correo)",
                         "link_publicacion": links.get(nid, ""),
                     })
             except Exception as e:
                 print(f"Error enriqueciendo completados correo: {e}")
+
+        # Poner los del correo de primeros
+        correo_nids = set(c["nid"] for c in completados) if completados else set()
+        inmuebles.sort(key=lambda x: (0 if x["nid"] in correo_nids else 1, x.get("fecha_recorrido", "") or ""), reverse=False)
+        # Los del correo primero, luego el resto por fecha
+        del_correo = [i for i in inmuebles if i["nid"] in correo_nids]
+        del_bq = [i for i in inmuebles if i["nid"] not in correo_nids]
+        inmuebles = del_correo + del_bq
 
         return jsonify(inmuebles)
     except Exception as e:
