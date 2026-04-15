@@ -415,7 +415,7 @@ def api_por_publicar():
         CASE WHEN DATE(SAFE_CAST(NULLIF(b.fecha_inicio, 'nan') AS TIMESTAMP)) < CURRENT_DATE()
              AND b.status NOT IN ('Cancelado', 'No realizada', 'En obra', 'Agendado')
              THEN 'Con 360' ELSE 'Sin 360' END AS visita_efectuada,
-        CASE WHEN fc.nid IS NOT NULL THEN 'Fotos cliente' ELSE 'Sin fotos profesionales' END AS tipo_fotos
+        CASE WHEN fc.nid IS NOT NULL THEN 'Publicado sin fotos profesionales' ELSE 'Sin publicar' END AS tipo_fotos
       FROM `papyrus-data.habi_wh_inmobiliaria.consolidado_habi_inmobiliaria` cd
       LEFT JOIN bubble_unica b ON CAST(cd.nid AS STRING) = b.nid
       LEFT JOIN `papyrus-data.habi_brokers_listing.property_card` pc ON cd.nid = pc.nid
