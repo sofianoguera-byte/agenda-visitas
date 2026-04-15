@@ -166,6 +166,7 @@
                     <option value="90">Últimos 3 meses</option>
                 </select>
                 <select id="filter-dia-cancel"><option value="todos">Todos los días</option></select>
+                <select id="filter-equipo-cancel"><option value="todos">Todos los equipos</option></select>
                 <select id="filter-comercial-cancel"><option value="todos">Todos los comerciales</option></select>
                 <select id="filter-ciudad-cancel"><option value="todos">Todas las ciudades</option></select>
             </div>
@@ -326,6 +327,7 @@
         document.getElementById('filter-ciudad').addEventListener('change', renderCards);
         document.getElementById('search-cancel').addEventListener('input', renderCanceladas);
         document.getElementById('filter-dia-cancel').addEventListener('change', renderCanceladas);
+        document.getElementById('filter-equipo-cancel').addEventListener('change', renderCanceladas);
         document.getElementById('filter-comercial-cancel').addEventListener('change', renderCanceladas);
         document.getElementById('filter-ciudad-cancel').addEventListener('change', renderCanceladas);
 
@@ -545,6 +547,7 @@
                 } else {
                     document.getElementById('card-grid-cancel').style.display = 'grid';
                     buildFilterOptions(canceladas, 'filter-dia-cancel', 'fecha_reporte');
+                    buildFilterOptions(canceladas, 'filter-equipo-cancel', 'equipo');
                     buildFilterOptions(canceladas, 'filter-comercial-cancel', 'c_comercial_captacion');
                     buildFilterOptions(canceladas, 'filter-ciudad-cancel', 'ciudad');
                     renderCanceladas();
@@ -557,11 +560,12 @@
         function getFilteredCanceladas() {
             const search = document.getElementById('search-cancel').value.toLowerCase();
             const df = document.getElementById('filter-dia-cancel').value;
+            const ef = document.getElementById('filter-equipo-cancel').value;
             const cf = document.getElementById('filter-comercial-cancel').value;
             const cif = document.getElementById('filter-ciudad-cancel').value;
             return canceladas.filter(v => {
                 const ms = !search || v.nid.toLowerCase().includes(search) || v.ciudad.toLowerCase().includes(search) || v.c_comercial_captacion.toLowerCase().includes(search);
-                return ms && (df === 'todos' || v.fecha_reporte === df) && (cf === 'todos' || v.c_comercial_captacion === cf) && (cif === 'todos' || v.ciudad === cif);
+                return ms && (df === 'todos' || v.fecha_reporte === df) && (ef === 'todos' || v.equipo === ef) && (cf === 'todos' || v.c_comercial_captacion === cf) && (cif === 'todos' || v.ciudad === cif);
             });
         }
 
