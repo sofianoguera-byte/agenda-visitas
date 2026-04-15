@@ -167,13 +167,13 @@ def parsear_correo(msg):
 
 
 def leer_completados_correo():
-    """Lee correos de la semana y extrae los NIDs visitados (SI)."""
+    """Lee correos del mes y extrae los NIDs visitados (SI)."""
     try:
         mail = imaplib.IMAP4_SSL("imap.gmail.com")
         mail.login(EMAIL_USER, EMAIL_PASS)
         mail.select("inbox")
 
-        desde = (datetime.now() - timedelta(days=7)).strftime("%d-%b-%Y")
+        desde = datetime.now().replace(day=1).strftime("%d-%b-%Y")
         status, messages = mail.search(None, f'FROM "gerencia@cleaningms.com.co" SINCE {desde}')
         ids = messages[0].split()
         if not ids:
