@@ -519,11 +519,9 @@
             const btn = document.getElementById('btn-confirmar-cancelacion');
             btn.disabled = true; btn.textContent = 'Procesando...';
             try {
-                const res = await fetch('/api/cancelar', { method: 'POST', headers: {'Content-Type':'application/json'},
-                    body: JSON.stringify({ nid: visita.nid, ciudad: visita.ciudad, fecha_fin: (visita.fecha_fin ? visita.fecha_fin.split('T')[0] : '') + (visita.hora ? ' a las ' + visita.hora : '') })
+                await fetch('/api/cancelar', { method: 'POST', headers: {'Content-Type':'application/json'},
+                    body: JSON.stringify({ nid: visita.nid, ciudad: visita.ciudad, comercial: visita.c_comercial_captacion, fecha_fin: (visita.fecha_fin ? visita.fecha_fin.split('T')[0] : '') + (visita.hora ? ' a las ' + visita.hora : '') })
                 });
-                const data = await res.json();
-                window.open(data.gmail_url, '_blank');
                 statusMap[nid] = 'cancelada';
                 guardarEstadoCompartido(nid, 'cancelada');
                 // Agregar a canceladas para reagendar
@@ -542,7 +540,7 @@
                 canceladasManuales.push(nuevaCancelada);
                 saveState();
                 if (canceladasLoaded) renderCanceladas();
-                showToast(`NID ${nid} cancelada. Se abrió correo para mariaalonso@habi.co`, 'info');
+                showToast(`NID ${nid} cancelada. Correo enviado a Sofia.`, 'info');
             } catch (err) { showToast('Error: ' + err.message, 'error'); }
             btn.disabled = false; btn.textContent = 'Sí, cancelar visita';
             cerrarModal(); renderCards();

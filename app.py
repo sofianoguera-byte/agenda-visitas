@@ -601,20 +601,33 @@ def cancelar_visita():
     nid = data.get("nid", "")
     ciudad = data.get("ciudad", "")
     fecha_fin = data.get("fecha_fin", "")
+    comercial = data.get("comercial", "")
 
-    destinatario = "mariaalonso@habi.co"
-    asunto = f"Cancelación visita 360 - NID {nid}"
+    asunto = "CANCELADA 360"
     cuerpo = (
-        f"Hola María José,\n\n"
         f"La visita 360 del NID {nid} agendada para el {fecha_fin} "
         f"fue cancelada por el cliente.\n\n"
-        f"Saludos,\n"
-        f"Equipo Comercial Habi"
+        f"Ciudad: {ciudad}\n"
+        f"Comercial: {comercial}\n"
     )
 
-    mailto_url = f"mailto:{destinatario}?subject={quote(asunto)}&body={quote(cuerpo)}"
-    gmail_url = f"https://mail.google.com/mail/?view=cm&to={destinatario}&su={quote(asunto)}&body={quote(cuerpo)}"
-    return jsonify({"status": "ok", "mailto_url": mailto_url, "gmail_url": gmail_url})
+    try:
+        import smtplib
+        from email.mime.text import MIMEText
+        from email.mime.multipart import MIMEMultipart
+        msg = MIMEMultipart()
+        msg["From"] = EMAIL_USER
+        msg["To"] = EMAIL_USER
+        msg["Subject"] = asunto
+        msg.attach(MIMEText(cuerpo, "plain"))
+        with smtplib.SMTP("smtp.gmail.com", 587) as server:
+            server.starttls()
+            server.login(EMAIL_USER, EMAIL_PASS)
+            server.send_message(msg)
+        return jsonify({"status": "ok"})
+    except Exception as e:
+        print(f"Error enviando correo cancelación: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 
 ESTADOS_FILE = os.path.join(os.path.dirname(__file__), "estados_visitas.json")
