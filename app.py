@@ -487,10 +487,8 @@ def api_por_publicar():
         d.estado_patrimonio,
         d.date_publication,
         CASE WHEN pc.id IS NULL THEN 'Sin CMS' ELSE 'Con CMS' END AS ficha_cms,
-        CASE WHEN DATE(SAFE_CAST(NULLIF(b.fecha_inicio, 'nan') AS TIMESTAMP)) < CURRENT_DATE()
-             AND b.status NOT IN ('Cancelado', 'No realizada', 'En obra', 'Agendado')
-             THEN 'Con 360' ELSE 'Sin 360' END AS visita_efectuada,
-        CASE WHEN fc.nid IS NOT NULL THEN 'Publicado sin fotos profesionales' ELSE 'Sin publicar' END AS tipo_fotos
+        CASE WHEN fc.nid IS NOT NULL THEN 'Publicado sin fotos profesionales'
+             ELSE 'Sin publicar' END AS tipo_fotos
       FROM `papyrus-data.habi_wh_inmobiliaria.consolidado_habi_inmobiliaria` cd
       LEFT JOIN bubble_unica b ON CAST(cd.nid AS STRING) = b.nid
       LEFT JOIN `papyrus-data.habi_brokers_listing.property_card` pc ON cd.nid = pc.nid
@@ -501,17 +499,18 @@ def api_por_publicar():
       WHERE cd.fecha_desistio_inmobiliaria IS NULL
         AND h.fecha_desistio_inmobiliaria IS NULL
         AND dealstage != '1182117639'
-        AND d.estado_patrimonio IN ('Sin patrimonio', 'Patrimonio levantado')
+        AND cd.c_fecha_captacion IS NOT NULL
+        AND d.estado_patrimonio = 'Sin patrimonio'
+        AND b.status = 'Finalizado'
         AND (d.date_publication IS NULL OR fc.nid IS NOT NULL)
     ),
     base_unica AS (
       SELECT *, ROW_NUMBER() OVER (PARTITION BY nid ORDER BY Fecha_recorrido DESC NULLS LAST) AS rn FROM base
     )
     SELECT nid, c_comercial_captacion, ciudad, c_equipo_seller, Fecha_recorrido, status,
-      estado_patrimonio, ficha_cms, visita_efectuada, tipo_fotos, date_publication,
-      CONCAT(IFNULL(estado_patrimonio, ''), ', ', ficha_cms, ', ', visita_efectuada, ', ', tipo_fotos) AS Estado_actual
+      estado_patrimonio, ficha_cms, tipo_fotos, date_publication,
+      CONCAT(IFNULL(estado_patrimonio, ''), ', ', ficha_cms, ', ', tipo_fotos) AS Estado_actual
     FROM base_unica WHERE rn = 1
-      AND visita_efectuada = 'Con 360'
     ORDER BY Fecha_recorrido DESC
     """
     try:
@@ -529,7 +528,7 @@ def api_por_publicar():
                 "status_bubble": row.status or "",
                 "ficha_cms": row.ficha_cms or "",
                 "patrimonio": row.estado_patrimonio or "",
-                "visita_360": row.visita_efectuada or "",
+                "visita_360": "Con 360",
                 "tipo_fotos": row.tipo_fotos or "",
                 "estado_actual": row.Estado_actual or "",
                 "link_publicacion": links.get(nid, ""),
@@ -557,7 +556,7 @@ def api_por_publicar():
             ) fc ON cd.nid = fc.nid
             WHERE CAST(cd.nid AS STRING) IN ({nids_str})
               AND cd.fecha_desistio_inmobiliaria IS NULL
-              AND (d.estado_patrimonio IS NULL OR d.estado_patrimonio IN ('Sin patrimonio', 'Patrimonio levantado'))
+              AND (d.estado_patrimonio IS NULL OR d.estado_patrimonio = 'Sin patrimonio')
               AND (d.date_publication IS NULL OR fc.nid IS NOT NULL)
             """
             try:
@@ -581,12 +580,12 @@ def api_por_publicar():
             except Exception as e:
                 print(f"Error enriqueciendo completados correo: {e}")
 
-        # Poner los del correo de primeros
+        # Poner los del correo de primeros, todo ordenado de más reciente a más viejo
         correo_nids = set(c["nid"] for c in completados) if completados else set()
-        inmuebles.sort(key=lambda x: (0 if x["nid"] in correo_nids else 1, x.get("fecha_recorrido", "") or ""), reverse=False)
-        # Los del correo primero, luego el resto por fecha
-        del_correo = [i for i in inmuebles if i["nid"] in correo_nids]
-        del_bq = [i for i in inmuebles if i["nid"] not in correo_nids]
+        del_correo = sorted([i for i in inmuebles if i["nid"] in correo_nids],
+                            key=lambda x: x.get("fecha_recorrido", "") or "", reverse=True)
+        del_bq = sorted([i for i in inmuebles if i["nid"] not in correo_nids],
+                        key=lambda x: x.get("fecha_recorrido", "") or "", reverse=True)
         inmuebles = del_correo + del_bq
 
         return jsonify(inmuebles)
