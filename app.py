@@ -504,6 +504,7 @@ def api_por_publicar():
         AND b.status = 'Finalizado'
         AND (d.date_publication IS NULL OR fc.nid IS NOT NULL)
         AND (cd.date_publication IS NULL OR fc.nid IS NOT NULL)
+        AND cd.v_fecha_venta IS NULL
     ),
     base_unica AS (
       SELECT *, ROW_NUMBER() OVER (PARTITION BY nid ORDER BY Fecha_recorrido DESC NULLS LAST) AS rn FROM base
@@ -567,6 +568,7 @@ def api_por_publicar():
               AND (d.estado_patrimonio IS NULL OR d.estado_patrimonio = 'Sin patrimonio')
               AND (d.date_publication IS NULL OR fc.nid IS NOT NULL)
               AND (cd.date_publication IS NULL OR fc.nid IS NOT NULL)
+              AND cd.v_fecha_venta IS NULL
               AND fp.nid IS NULL
             """
             try:
