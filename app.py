@@ -554,10 +554,18 @@ def api_por_publicar():
                 ON pc2.id = pi2.property_card_id
               WHERE pi2.source_image_id = 3
             ) fc ON cd.nid = fc.nid
+            LEFT JOIN (
+              SELECT DISTINCT pc3.nid
+              FROM `papyrus-data.habi_brokers_listing.property_card` pc3
+              INNER JOIN `papyrus-data.habi_brokers_listing.property_image` pi3
+                ON pc3.id = pi3.property_card_id
+              WHERE pi3.source_image_id != 3
+            ) fp ON cd.nid = fp.nid
             WHERE CAST(cd.nid AS STRING) IN ({nids_str})
               AND cd.fecha_desistio_inmobiliaria IS NULL
               AND (d.estado_patrimonio IS NULL OR d.estado_patrimonio = 'Sin patrimonio')
               AND (d.date_publication IS NULL OR fc.nid IS NOT NULL)
+              AND fp.nid IS NULL
             """
             try:
                 for row in client.query(q_extra).result():
