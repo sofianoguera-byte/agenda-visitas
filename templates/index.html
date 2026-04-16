@@ -118,6 +118,7 @@
         <div class="tab active" data-tab="visitas" onclick="switchTab('visitas')">Visitas de Mañana</div>
         <div class="tab" data-tab="canceladas" onclick="switchTab('canceladas')">Canceladas por Reagendar</div>
         <div class="tab" data-tab="publicar" onclick="switchTab('publicar')">Por Publicar</div>
+        <div class="tab" data-tab="agendar" onclick="switchTab('agendar')">Por Agendar</div>
     </div>
 
     <!-- TAB 1: Visitas de mañana -->
@@ -220,6 +221,41 @@
         </div>
     </div>
 
+    <!-- TAB 4: Por Agendar -->
+    <div class="tab-content" id="tab-agendar">
+        <div class="stats-bar">
+            <div class="stat-card"><div class="icon total">&#x1f4cb;</div><div class="info"><h3 id="stat-ag-total">-</h3><p>Total por agendar</p></div></div>
+        </div>
+        <div class="container">
+            <div class="search-bar">
+                <input type="text" id="search-ag" placeholder="Buscar por NID, ciudad o comercial...">
+                <select id="filter-equipo-ag"><option value="todos">Todos los equipos</option></select>
+                <select id="filter-comercial-ag"><option value="todos">Todos los comerciales</option></select>
+                <select id="filter-ciudad-ag"><option value="todos">Todas las ciudades</option></select>
+            </div>
+            <div id="loading-ag" class="loading"><div class="spinner"></div><p>Cargando inmuebles por agendar...</p></div>
+            <div id="table-ag-container" style="display:none;overflow-x:auto;">
+                <table id="table-ag" style="width:100%;border-collapse:collapse;background:white;border-radius:12px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.06);">
+                    <thead>
+                        <tr style="background:#f59e0b;color:white;text-align:left;">
+                            <th style="padding:12px 16px;font-size:13px;">NID</th>
+                            <th style="padding:12px 16px;font-size:13px;">Comercial</th>
+                            <th style="padding:12px 16px;font-size:13px;">Equipo</th>
+                            <th style="padding:12px 16px;font-size:13px;">Ciudad</th>
+                            <th style="padding:12px 16px;font-size:13px;">Fecha Captación</th>
+                            <th style="padding:12px 16px;font-size:13px;">Teléfono</th>
+                            <th style="padding:12px 16px;font-size:13px;">Último Status</th>
+                            <th style="padding:12px 16px;font-size:13px;">Estado Publicación</th>
+                            <th style="padding:12px 16px;font-size:13px;">Agendar</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tbody-ag"></tbody>
+                </table>
+            </div>
+            <div id="empty-ag" class="empty-state" style="display:none;"><h2>No hay inmuebles por agendar</h2></div>
+        </div>
+    </div>
+
     <!-- Modales -->
     <div class="modal-overlay" id="modal-cancelar">
         <div class="modal">
@@ -314,6 +350,7 @@
             document.getElementById('tab-' + tab).classList.add('active');
             if (tab === 'canceladas' && !canceladasLoaded) fetchCanceladas();
             if (tab === 'publicar' && !publicarLoaded) fetchPorPublicar();
+            if (tab === 'agendar' && !agendarLoaded) fetchPorAgendar();
         }
 
         // --- Init ---
@@ -857,6 +894,80 @@
             if (!pubStatusMap[nid]) pubStatusMap[nid] = {};
             pubStatusMap[nid].comentario = comentario;
             savePubState();
+        }
+        // ==========================
+        // TAB 4: POR AGENDAR
+        // ==========================
+        let porAgendar = [];
+        let agendarLoaded = false;
+
+        document.getElementById('search-ag').addEventListener('input', renderPorAgendar);
+        document.getElementById('filter-equipo-ag').addEventListener('change', renderPorAgendar);
+        document.getElementById('filter-comercial-ag').addEventListener('change', renderPorAgendar);
+        document.getElementById('filter-ciudad-ag').addEventListener('change', renderPorAgendar);
+
+        async function fetchPorAgendar() {
+            try {
+                const res = await fetch('/api/por-agendar');
+                porAgendar = await res.json();
+                agendarLoaded = true;
+                document.getElementById('loading-ag').style.display = 'none';
+                if (porAgendar.length === 0) {
+                    document.getElementById('empty-ag').style.display = 'block';
+                } else {
+                    document.getElementById('table-ag-container').style.display = 'block';
+                    buildFilterOptions(porAgendar, 'filter-equipo-ag', 'equipo');
+                    buildFilterOptions(porAgendar, 'filter-comercial-ag', 'comercial');
+                    buildFilterOptions(porAgendar, 'filter-ciudad-ag', 'ciudad');
+                    renderPorAgendar();
+                }
+            } catch (err) {
+                document.getElementById('loading-ag').innerHTML = '<p style="color:#ef4444;">Error al cargar.</p>';
+            }
+        }
+
+        function getFilteredAgendar() {
+            const search = document.getElementById('search-ag').value.toLowerCase();
+            const ef = document.getElementById('filter-equipo-ag').value;
+            const cf = document.getElementById('filter-comercial-ag').value;
+            const cif = document.getElementById('filter-ciudad-ag').value;
+            return porAgendar.filter(v => {
+                const ms = !search || v.nid.includes(search) || v.ciudad.toLowerCase().includes(search) || v.comercial.toLowerCase().includes(search);
+                return ms && (ef === 'todos' || v.equipo === ef) && (cf === 'todos' || v.comercial === cf) && (cif === 'todos' || v.ciudad === cif);
+            });
+        }
+
+        function formatPhoneAg(phone) {
+            if (!phone) return '';
+            let clean = phone.replace(/[^0-9]/g, '');
+            if (clean.length === 10 && clean.startsWith('3')) clean = '57' + clean;
+            return clean;
+        }
+
+        function renderPorAgendar() {
+            const tbody = document.getElementById('tbody-ag');
+            const filtered = getFilteredAgendar();
+
+            tbody.innerHTML = filtered.map(v => {
+                const phone = formatPhoneAg(v.telefono_cliente);
+                return `
+                <tr style="border-bottom:1px solid #e5e7eb;">
+                    <td style="padding:10px 16px;font-weight:600;font-size:13px;">${v.nid}</td>
+                    <td style="padding:10px 16px;font-size:13px;">${v.comercial || 'N/A'}</td>
+                    <td style="padding:10px 16px;font-size:13px;">${v.equipo || 'N/A'}</td>
+                    <td style="padding:10px 16px;font-size:13px;">${v.ciudad || 'N/A'}</td>
+                    <td style="padding:10px 16px;font-size:13px;">${v.fecha_captacion || 'N/A'}</td>
+                    <td style="padding:10px 16px;font-size:13px;">${v.telefono_cliente || 'Sin teléfono'}</td>
+                    <td style="padding:10px 16px;font-size:13px;">${v.ultimo_status || 'Sin visita'}</td>
+                    <td style="padding:10px 16px;font-size:13px;">${v.tipo_fotos || 'N/A'}</td>
+                    <td style="padding:10px 16px;">
+                        <a href="https://visitahabi.bubbleapps.io/home_algoritmo" target="_blank" class="btn btn-sm" style="background:#f59e0b;">Agendar</a>
+                        ${phone ? `<a href="https://wa.me/${phone}?text=${encodeURIComponent('Hola, te escribimos de Habi. Queremos agendar la visita de toma de fotografías profesionales de tu inmueble. ¿Qué día y hora te queda bien? Quedamos atentos.')}" target="_blank" class="btn btn-sm btn-whatsapp">WhatsApp</a>` : ''}
+                    </td>
+                </tr>`;
+            }).join('');
+
+            document.getElementById('stat-ag-total').textContent = filtered.length;
         }
     </script>
 </body>

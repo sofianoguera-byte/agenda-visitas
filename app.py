@@ -387,6 +387,73 @@ def get_links_publicacion():
         return {}
 
 
+@app.route("/api/por-agendar")
+def api_por_agendar():
+    query = """
+    WITH bubble_unica AS (
+      SELECT * FROM (
+        SELECT b.nid, b.status, b.fecha_inicio, b.modified_date,
+          ROW_NUMBER() OVER (PARTITION BY b.nid ORDER BY b.modified_date DESC) AS rn
+        FROM `papyrus-master.bubble_gold.mart_bubble_schedule_co` b
+        WHERE b.visit_category = 'Habi Inmobiliaria'
+      ) WHERE rn = 1
+    ),
+    tiene_fotos_cliente AS (
+      SELECT DISTINCT pc.nid
+      FROM `papyrus-data.habi_brokers_listing.property_card` pc
+      INNER JOIN `papyrus-data.habi_brokers_listing.property_image` pi
+        ON pc.id = pi.property_card_id
+      WHERE pi.source_image_id = 3
+    )
+    SELECT
+      cd.nid,
+      cd.c_comercial_captacion,
+      cd.c_equipo_seller,
+      cd.ciudad,
+      DATE(cd.c_fecha_captacion) AS fecha_captacion,
+      cd.tel_fono_del_cliente_1 AS telefono_cliente,
+      b.status AS ultimo_status,
+      d.date_publication,
+      CASE WHEN fc.nid IS NOT NULL THEN 'Publicado sin fotos profesionales' ELSE 'Sin publicar' END AS tipo_fotos
+    FROM `papyrus-data.habi_wh_inmobiliaria.consolidado_habi_inmobiliaria` cd
+    LEFT JOIN bubble_unica b ON CAST(cd.nid AS STRING) = b.nid
+    LEFT JOIN `papyrus-data.habi_brokers_listing.property_card` pc ON cd.nid = pc.nid
+    LEFT JOIN `papyrus-delivery-data.inmobiliaria.detalle_estado_captaciones` d ON cd.nid = d.nid
+    LEFT JOIN `papyrus-master.squad_bi_global.hubspot_deal` h
+      ON SAFE_CAST(cd.nid AS INT64) = h.nid AND h.pipeline = '803674753'
+    LEFT JOIN tiene_fotos_cliente fc ON cd.nid = fc.nid
+    WHERE cd.fecha_desistio_inmobiliaria IS NULL
+      AND h.fecha_desistio_inmobiliaria IS NULL
+      AND dealstage != '1182117639'
+      AND (d.date_publication IS NULL OR fc.nid IS NOT NULL)
+      AND (b.nid IS NULL OR b.status NOT IN ('Agendado', 'Cerrado'))
+    ORDER BY cd.c_fecha_captacion DESC
+    """
+    try:
+        results = client.query(query).result()
+        inmuebles = []
+        seen = set()
+        for row in results:
+            nid = str(row.nid) if row.nid else ""
+            if nid in seen:
+                continue
+            seen.add(nid)
+            inmuebles.append({
+                "nid": nid,
+                "comercial": row.c_comercial_captacion or "",
+                "ciudad": (row.ciudad or "").title(),
+                "equipo": row.c_equipo_seller or "",
+                "fecha_captacion": str(row.fecha_captacion) if row.fecha_captacion else "",
+                "telefono_cliente": str(row.telefono_cliente) if row.telefono_cliente else "",
+                "ultimo_status": row.ultimo_status or "Sin visita",
+                "tipo_fotos": row.tipo_fotos or "",
+            })
+        return jsonify(inmuebles)
+    except Exception as e:
+        print(f"Error consultando por agendar: {e}")
+        return jsonify([])
+
+
 @app.route("/api/por-publicar")
 def api_por_publicar():
     query = """
