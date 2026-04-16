@@ -58,19 +58,19 @@ def utc_to_colombia(iso_str):
 def get_visitas_manana():
     tomorrow = get_fecha_manana()
     query = f"""
-    WITH ultimo_registro AS (
+    WITH registros_manana AS (
         SELECT *,
             ROW_NUMBER() OVER (PARTITION BY nid ORDER BY modified_date DESC) AS rn
         FROM `papyrus-master.bubble_gold.mart_bubble_schedule_co`
         WHERE nid != 'nan'
             AND nid IS NOT NULL
             AND visit_type = 'Habi Inmobiliaria'
+            AND fecha_fin LIKE '{tomorrow}%'
     ),
     visitas_manana AS (
-        SELECT * FROM ultimo_registro
+        SELECT * FROM registros_manana
         WHERE rn = 1
             AND status IN ('Agendado', 'Cerrado')
-            AND fecha_fin LIKE '{tomorrow}%'
     )
     SELECT
         v.nid, v.fecha_fin, v.fecha_inicio, v.ciudad_muni, v.zona,
