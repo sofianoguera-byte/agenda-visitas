@@ -678,25 +678,78 @@ def guardar_estado_visita():
     return jsonify({"status": "ok"})
 
 
-@app.route("/api/estados")
-def obtener_estados():
-    """Lee estados desde Google Sheet y devuelve los de mañana."""
-    fecha = get_fecha_manana()
-    estados = {}
+ESTADOS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbz0mAvpiwFYUMhZWwd6JxbUHVVh6EH-d8eiRqFRXmjIJaFh6xFPmz4-tWk5I8Ww-Wpe/exec"
+ESTADOS_SHEET_URL = "https://docs.google.com/spreadsheets/d/1rxvkkdcCnv6eoyRBMvGgjbiP2tiITE_mO7wpZDpoCOw/export?format=csv"
+
+
+def leer_sheet_estados():
+    """Lee todas las filas del Sheet de estados."""
+    filas = []
     try:
-        r = http_requests.get(
-            "https://docs.google.com/spreadsheets/d/1rxvkkdcCnv6eoyRBMvGgjbiP2tiITE_mO7wpZDpoCOw/export?format=csv",
-            timeout=15,
-        )
+        r = http_requests.get(ESTADOS_SHEET_URL, timeout=15)
         reader = csv.DictReader(io.StringIO(r.text))
         for row in reader:
-            nid = (row.get("nid") or "").strip()
-            f = (row.get("fecha") or "").strip()
-            estado = (row.get("estado") or "").strip()
-            if nid and f == fecha and estado:
-                estados[nid] = estado
+            filas.append({
+                "nid": (row.get("nid") or "").strip(),
+                "fecha": (row.get("fecha") or "").strip(),
+                "estado": (row.get("estado") or "").strip(),
+            })
     except Exception as e:
-        print(f"Error leyendo estados del Sheet: {e}")
+        print(f"Error leyendo Sheet: {e}")
+    return filas
+
+
+@app.route("/api/estados")
+def obtener_estados():
+    """Devuelve todos los estados de mañana, separados por tipo."""
+    fecha = get_fecha_manana()
+    visita_estados = {}
+    whatsapp = {}
+    cancel_contacto = {}
+    pub_estado = {}
+    pub_comentario = {}
+
+    for row in leer_sheet_estados():
+        nid = row["nid"]
+        f = row["fecha"]
+        estado = row["estado"]
+        if not nid or f != fecha or not estado:
+            continue
+
+        if estado.startswith("wa:"):
+            whatsapp[nid] = True
+        elif estado.startswith("cc:"):
+            cancel_contacto[nid] = estado[3:]
+        elif estado.startswith("ps:"):
+            pub_estado[nid] = estado[3:]
+        elif estado.startswith("pc:"):
+            pub_comentario[nid] = estado[3:]
+        else:
+            visita_estados[nid] = estado
+
+    return jsonify({
+        "visita": visita_estados,
+        "whatsapp": whatsapp,
+        "cancelContacto": cancel_contacto,
+        "pubEstado": pub_estado,
+        "pubComentario": pub_comentario,
+    })
+
+
+@app.route("/api/guardar-estado", methods=["POST"])
+def guardar_estado_compartido():
+    """Escribe un estado al Google Sheet via Apps Script."""
+    data = request.json
+    nid = data.get("nid", "")
+    fecha = data.get("fecha", get_fecha_manana())
+    estado = data.get("estado", "")
+    try:
+        http_requests.post(ESTADOS_SCRIPT_URL, json={
+            "nid": nid, "fecha": fecha, "estado": estado
+        }, timeout=10)
+    except Exception as e:
+        print(f"Error escribiendo al Sheet: {e}")
+    return jsonify({"status": "ok"})
     return jsonify(estados)
 
 

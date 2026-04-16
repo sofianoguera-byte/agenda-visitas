@@ -296,39 +296,40 @@
     <script>
         let visitas = [];
         let canceladas = [];
+        // URLs de Apps Scripts (solo se usa la de desistir directamente)
         const ESTADOS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbz0mAvpiwFYUMhZWwd6JxbUHVVh6EH-d8eiRqFRXmjIJaFh6xFPmz4-tWk5I8Ww-Wpe/exec';
-        const ESTADOS_CSV_URL = 'https://docs.google.com/spreadsheets/d/1rxvkkdcCnv6eoyRBMvGgjbiP2tiITE_mO7wpZDpoCOw/export?format=csv';
 
         let statusMap = {};
-        let cancelContactMap = JSON.parse(localStorage.getItem('cancelContactMap') || '{}');
-        let canceladasManuales = JSON.parse(localStorage.getItem('canceladasManuales') || '[]');
+        let cancelContactMap = {};
+        let canceladasManuales = [];
+        let whatsappMap = {};
+        let pubStatusMap = {};
+        let pubCommentMap = {};
 
-        // Cargar estados compartidos desde backend (lee Google Sheet)
+        // Cargar todos los estados compartidos desde backend
         async function cargarEstadosCompartidos() {
             try {
                 const res = await fetch('/api/estados');
-                statusMap = await res.json();
+                const data = await res.json();
+                statusMap = data.visita || {};
+                whatsappMap = data.whatsapp || {};
+                cancelContactMap = data.cancelContacto || {};
+                pubStatusMap = data.pubEstado || {};
+                pubCommentMap = data.pubComentario || {};
             } catch (e) { console.error('Error cargando estados:', e); }
         }
 
         function guardarEstadoCompartido(nid, estado) {
-            fetch(ESTADOS_SCRIPT_URL, {
+            fetch('/api/guardar-estado', {
                 method: 'POST',
-                mode: 'no-cors',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({nid, fecha: FECHA_MANANA, estado})
             });
         }
 
-        function saveState() {
-            localStorage.setItem('cancelContactMap', JSON.stringify(cancelContactMap));
-            localStorage.setItem('canceladasManuales', JSON.stringify(canceladasManuales));
-            localStorage.setItem('whatsappMap', JSON.stringify(whatsappMap));
-        }
-
         function marcarWhatsApp(nid) {
             whatsappMap[nid] = true;
-            saveState();
+            guardarEstadoCompartido(nid, 'wa:true');
             renderCards();
             renderCanceladas();
         }
@@ -350,7 +351,6 @@
 
         // --- Init ---
         document.addEventListener('DOMContentLoaded', fetchVisitas);
-        let whatsappMap = JSON.parse(localStorage.getItem('whatsappMap') || '{}');
 
         document.getElementById('search').addEventListener('input', renderCards);
         document.getElementById('filter-status').addEventListener('change', renderCards);
@@ -560,6 +560,7 @@
 
         async function fetchCanceladas() {
             try {
+                await cargarEstadosCompartidos();
                 const dias = document.getElementById('filter-rango-cancel').value;
                 const res = await fetch('/api/canceladas?dias=' + dias);
                 const data = await res.json();
@@ -622,7 +623,7 @@
                         <div style="position:absolute;top:16px;right:16px;display:flex;gap:6px;">
                             ${contacted ? '<span style="background:#d1fae5;color:#065f46;padding:4px 10px;border-radius:20px;font-size:11px;font-weight:700;">Contactado</span>' : ''}
                             ${cancelContactMap[v.nid] === 'agendado' ? '<span style="background:#dbeafe;color:#1e40af;padding:4px 10px;border-radius:20px;font-size:11px;font-weight:700;">Agendado</span>' : ''}
-                            ${cancelContactMap[v.nid] === true && !whatsappMap[v.nid] ? '<span style="background:#fee2e2;color:#991b1b;padding:4px 10px;border-radius:20px;font-size:11px;font-weight:700;">Desistido</span>' : ''}
+                            ${cancelContactMap[v.nid] === 'desistido' ? '<span style="background:#fee2e2;color:#991b1b;padding:4px 10px;border-radius:20px;font-size:11px;font-weight:700;">Desistido</span>' : ''}
                         </div>
                         <div class="card-header">
                             <span class="nid-badge">NID ${v.nid}</span>
@@ -661,15 +662,14 @@
 
         function marcarAgendado(nid) {
             cancelContactMap[nid] = 'agendado';
-            saveState();
+            guardarEstadoCompartido(nid, 'cc:agendado');
             renderCanceladas();
             showToast('NID ' + nid + ' marcado como agendado/realizado', 'success');
         }
 
         function marcarWhatsAppCancel(nid) {
             whatsappMap[nid] = true;
-            saveState();
-            // Re-render after a small delay to allow the link to open
+            guardarEstadoCompartido(nid, 'wa:true');
             setTimeout(() => renderCanceladas(), 300);
         }
 
@@ -701,8 +701,8 @@
                     })
                 });
             } catch (e) { console.error(e); }
-            cancelContactMap[nid] = true;
-            saveState();
+            cancelContactMap[nid] = 'desistido';
+            guardarEstadoCompartido(nid, 'cc:desistido');
             cerrarModalDesistir();
             renderCanceladas();
             showToast('NID ' + nid + ' marcado como desistimiento', 'info');
@@ -772,19 +772,14 @@
         // ==========================
         let porPublicar = [];
         let publicarLoaded = false;
-        let pubStatusMap = JSON.parse(localStorage.getItem('pubStatusMap') || '{}');  // nid -> {status, comentario}
-
         document.getElementById('search-pub').addEventListener('input', renderPorPublicar);
         document.getElementById('filter-equipo-pub').addEventListener('change', renderPorPublicar);
         document.getElementById('filter-comercial-pub').addEventListener('change', renderPorPublicar);
         document.getElementById('filter-estado-pub').addEventListener('change', renderPorPublicar);
 
-        function savePubState() {
-            localStorage.setItem('pubStatusMap', JSON.stringify(pubStatusMap));
-        }
-
         async function fetchPorPublicar() {
             try {
+                await cargarEstadosCompartidos();
                 const res = await fetch('/api/por-publicar');
                 porPublicar = await res.json();
                 publicarLoaded = true;
@@ -809,7 +804,7 @@
             const sf = document.getElementById('filter-estado-pub').value;
             return porPublicar.filter(v => {
                 const ms = !search || v.nid.includes(search) || v.ciudad.toLowerCase().includes(search) || v.comercial.toLowerCase().includes(search) || v.estado_actual.toLowerCase().includes(search);
-                const ps = pubStatusMap[v.nid]?.status || 'pendiente';
+                const ps = pubStatusMap[v.nid] || 'pendiente';
                 return ms && (ef === 'todos' || v.equipo === ef) && (cf === 'todos' || v.comercial === cf) && (sf === 'todos' || ps === sf);
             });
         }
@@ -819,8 +814,9 @@
             const filtered = getFilteredPub();
 
             tbody.innerHTML = filtered.map(v => {
-                const ps = pubStatusMap[v.nid] || {};
-                const bgColor = ps.status === 'publicado' ? '#f0fdf4' : ps.status === 'no_publicado' ? '#fef2f2' : 'white';
+                const ps = pubStatusMap[v.nid] || 'pendiente';
+                const pc = pubCommentMap[v.nid] || '';
+                const bgColor = ps === 'publicado' ? '#f0fdf4' : ps === 'no_publicado' ? '#fef2f2' : 'white';
                 return `
                 <tr style="border-bottom:1px solid #e5e7eb;background:${bgColor};">
                     <td style="padding:10px 16px;font-weight:600;font-size:13px;">${v.nid}</td>
@@ -831,11 +827,11 @@
                     <td style="padding:10px 16px;font-size:12px;">${v.estado_actual || 'N/A'}</td>
                     <td style="padding:10px 16px;font-size:12px;">${v.link_publicacion ? `<a href="${v.link_publicacion}" target="_blank" style="color:#8b5cf6;font-weight:600;">Ver</a>` : '<span style="color:#9ca3af;">-</span>'}</td>
                     <td style="padding:10px 16px;white-space:nowrap;">
-                        <button class="btn btn-sm ${ps.status === 'publicado' ? 'btn-confirmar' : ''}" style="${ps.status !== 'publicado' ? 'background:#e5e7eb;color:#374151;' : ''}padding:5px 10px;font-size:11px;" onclick="togglePubStatus('${v.nid}','publicado')">Publicado</button>
-                        <button class="btn btn-sm ${ps.status === 'no_publicado' ? 'btn-cancelar' : ''}" style="${ps.status !== 'no_publicado' ? 'background:#e5e7eb;color:#374151;' : ''}padding:5px 10px;font-size:11px;" onclick="togglePubStatus('${v.nid}','no_publicado')">No publicado</button>
+                        <button class="btn btn-sm ${ps === 'publicado' ? 'btn-confirmar' : ''}" style="${ps !== 'publicado' ? 'background:#e5e7eb;color:#374151;' : ''}padding:5px 10px;font-size:11px;" onclick="togglePubStatus('${v.nid}','publicado')">Publicado</button>
+                        <button class="btn btn-sm ${ps === 'no_publicado' ? 'btn-cancelar' : ''}" style="${ps !== 'no_publicado' ? 'background:#e5e7eb;color:#374151;' : ''}padding:5px 10px;font-size:11px;" onclick="togglePubStatus('${v.nid}','no_publicado')">No publicado</button>
                     </td>
                     <td style="padding:10px 16px;">
-                        <input type="text" value="${ps.comentario || ''}" placeholder="Comentario..." onblur="guardarComentario('${v.nid}', this.value)"
+                        <input type="text" value="${pc}" placeholder="Comentario..." onblur="guardarComentario('${v.nid}', this.value)"
                             style="width:180px;padding:5px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;outline:none;">
                     </td>
                 </tr>`;
@@ -845,7 +841,7 @@
             const total = porPublicar.length;
             let pub = 0, nopub = 0;
             porPublicar.forEach(v => {
-                const s = pubStatusMap[v.nid]?.status;
+                const s = pubStatusMap[v.nid];
                 if (s === 'publicado') pub++;
                 if (s === 'no_publicado') nopub++;
             });
@@ -856,13 +852,13 @@
         }
 
         function togglePubStatus(nid, status) {
-            if (!pubStatusMap[nid]) pubStatusMap[nid] = {};
-            if (pubStatusMap[nid].status === status) {
-                delete pubStatusMap[nid].status;
+            if (pubStatusMap[nid] === status) {
+                delete pubStatusMap[nid];
+                guardarEstadoCompartido(nid, 'ps:');
             } else {
-                pubStatusMap[nid].status = status;
+                pubStatusMap[nid] = status;
+                guardarEstadoCompartido(nid, 'ps:' + status);
             }
-            savePubState();
             renderPorPublicar();
         }
 
@@ -870,8 +866,7 @@
             const filtered = getFilteredPub();
             const headers = ['NID','Comercial','Equipo','Ciudad','Fecha 360','Estado Actual','Link Publicacion','Estado','Comentario'];
             const rows = filtered.map(v => {
-                const ps = pubStatusMap[v.nid] || {};
-                return [v.nid, v.comercial, v.equipo, v.ciudad, v.fecha_recorrido, v.estado_actual, v.link_publicacion, ps.status || 'pendiente', ps.comentario || ''].map(c => '"' + (c || '').replace(/"/g, '""') + '"').join(',');
+                return [v.nid, v.comercial, v.equipo, v.ciudad, v.fecha_recorrido, v.estado_actual, v.link_publicacion, pubStatusMap[v.nid] || 'pendiente', pubCommentMap[v.nid] || ''].map(c => '"' + (c || '').replace(/"/g, '""') + '"').join(',');
             });
             const csv = [headers.join(','), ...rows].join('\n');
             const blob = new Blob(['\ufeff' + csv], {type: 'text/csv;charset=utf-8;'});
@@ -884,9 +879,8 @@
         }
 
         function guardarComentario(nid, comentario) {
-            if (!pubStatusMap[nid]) pubStatusMap[nid] = {};
-            pubStatusMap[nid].comentario = comentario;
-            savePubState();
+            pubCommentMap[nid] = comentario;
+            guardarEstadoCompartido(nid, 'pc:' + comentario);
         }
         // ==========================
         // TAB 4: POR AGENDAR
