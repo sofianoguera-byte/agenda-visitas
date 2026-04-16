@@ -680,10 +680,24 @@ def guardar_estado_visita():
 
 @app.route("/api/estados")
 def obtener_estados():
-    """Devuelve los estados guardados para mañana."""
+    """Lee estados desde Google Sheet y devuelve los de mañana."""
     fecha = get_fecha_manana()
-    estados = cargar_estados()
-    return jsonify(estados.get(fecha, {}))
+    estados = {}
+    try:
+        r = http_requests.get(
+            "https://docs.google.com/spreadsheets/d/1rxvkkdcCnv6eoyRBMvGgjbiP2tiITE_mO7wpZDpoCOw/export?format=csv",
+            timeout=15,
+        )
+        reader = csv.DictReader(io.StringIO(r.text))
+        for row in reader:
+            nid = (row.get("nid") or "").strip()
+            f = (row.get("fecha") or "").strip()
+            estado = (row.get("estado") or "").strip()
+            if nid and f == fecha and estado:
+                estados[nid] = estado
+    except Exception as e:
+        print(f"Error leyendo estados del Sheet: {e}")
+    return jsonify(estados)
 
 
 if __name__ == "__main__":

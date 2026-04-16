@@ -303,18 +303,11 @@
         let cancelContactMap = JSON.parse(localStorage.getItem('cancelContactMap') || '{}');
         let canceladasManuales = JSON.parse(localStorage.getItem('canceladasManuales') || '[]');
 
-        // Cargar estados compartidos desde Google Sheet
+        // Cargar estados compartidos desde backend (lee Google Sheet)
         async function cargarEstadosCompartidos() {
             try {
-                const res = await fetch(ESTADOS_CSV_URL);
-                const text = await res.text();
-                const lines = text.split('\n');
-                for (let i = 1; i < lines.length; i++) {
-                    const cols = lines[i].split(',');
-                    if (cols.length >= 3 && cols[1].trim() === FECHA_MANANA) {
-                        statusMap[cols[0].trim()] = cols[2].trim();
-                    }
-                }
+                const res = await fetch('/api/estados');
+                statusMap = await res.json();
             } catch (e) { console.error('Error cargando estados:', e); }
         }
 
