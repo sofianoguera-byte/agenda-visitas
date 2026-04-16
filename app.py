@@ -404,6 +404,12 @@ def api_por_agendar():
       INNER JOIN `papyrus-data.habi_brokers_listing.property_image` pi
         ON pc.id = pi.property_card_id
       WHERE pi.source_image_id = 3
+    ),
+    nids_con_finalizado AS (
+      SELECT DISTINCT nid
+      FROM `papyrus-master.bubble_gold.mart_bubble_schedule_co`
+      WHERE visit_category = 'Habi Inmobiliaria'
+        AND status = 'Finalizado'
     )
     SELECT
       cd.nid,
@@ -422,10 +428,12 @@ def api_por_agendar():
     LEFT JOIN `papyrus-master.squad_bi_global.hubspot_deal` h
       ON SAFE_CAST(cd.nid AS INT64) = h.nid AND h.pipeline = '803674753'
     LEFT JOIN tiene_fotos_cliente fc ON cd.nid = fc.nid
-    WHERE cd.fecha_desistio_inmobiliaria IS NULL
+    WHERE cd.c_fecha_captacion IS NOT NULL
+      AND cd.fecha_desistio_inmobiliaria IS NULL
       AND h.fecha_desistio_inmobiliaria IS NULL
       AND dealstage != '1182117639'
       AND (d.date_publication IS NULL OR fc.nid IS NOT NULL)
+      AND CAST(cd.nid AS STRING) NOT IN (SELECT nid FROM nids_con_finalizado)
       AND (b.nid IS NULL OR b.status NOT IN ('Agendado', 'Cerrado'))
     ORDER BY cd.c_fecha_captacion DESC
     """
