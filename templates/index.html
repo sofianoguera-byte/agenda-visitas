@@ -229,9 +229,11 @@
         <div class="container">
             <div class="search-bar">
                 <input type="text" id="search-ag" placeholder="Buscar por NID, ciudad o comercial...">
+                <select id="filter-mes-ag"><option value="todos">Todos los meses</option></select>
                 <select id="filter-equipo-ag"><option value="todos">Todos los equipos</option></select>
                 <select id="filter-comercial-ag"><option value="todos">Todos los comerciales</option></select>
                 <select id="filter-ciudad-ag"><option value="todos">Todas las ciudades</option></select>
+                <button class="btn" style="background:#6c3baa;font-size:13px;" onclick="descargarCSVAgendar()">Descargar CSV</button>
             </div>
             <div id="loading-ag" class="loading"><div class="spinner"></div><p>Cargando inmuebles por agendar...</p></div>
             <div id="table-ag-container" style="display:none;overflow-x:auto;">
@@ -900,6 +902,7 @@
         let agendarLoaded = false;
 
         document.getElementById('search-ag').addEventListener('input', renderPorAgendar);
+        document.getElementById('filter-mes-ag').addEventListener('change', renderPorAgendar);
         document.getElementById('filter-equipo-ag').addEventListener('change', renderPorAgendar);
         document.getElementById('filter-comercial-ag').addEventListener('change', renderPorAgendar);
         document.getElementById('filter-ciudad-ag').addEventListener('change', renderPorAgendar);
@@ -914,6 +917,11 @@
                     document.getElementById('empty-ag').style.display = 'block';
                 } else {
                     document.getElementById('table-ag-container').style.display = 'block';
+                    // Construir filtro de meses
+                    const meses = [...new Set(porAgendar.map(v => v.fecha_captacion ? v.fecha_captacion.substring(0,7) : '').filter(m => m))].sort().reverse();
+                    const selMes = document.getElementById('filter-mes-ag');
+                    while (selMes.options.length > 1) selMes.remove(1);
+                    meses.forEach(m => { const o = document.createElement('option'); o.value = m; o.textContent = m; selMes.appendChild(o); });
                     buildFilterOptions(porAgendar, 'filter-equipo-ag', 'equipo');
                     buildFilterOptions(porAgendar, 'filter-comercial-ag', 'comercial');
                     buildFilterOptions(porAgendar, 'filter-ciudad-ag', 'ciudad');
@@ -926,12 +934,14 @@
 
         function getFilteredAgendar() {
             const search = document.getElementById('search-ag').value.toLowerCase();
+            const mf = document.getElementById('filter-mes-ag').value;
             const ef = document.getElementById('filter-equipo-ag').value;
             const cf = document.getElementById('filter-comercial-ag').value;
             const cif = document.getElementById('filter-ciudad-ag').value;
             return porAgendar.filter(v => {
                 const ms = !search || v.nid.includes(search) || v.ciudad.toLowerCase().includes(search) || v.comercial.toLowerCase().includes(search);
-                return ms && (ef === 'todos' || v.equipo === ef) && (cf === 'todos' || v.comercial === cf) && (cif === 'todos' || v.ciudad === cif);
+                const mesCap = v.fecha_captacion ? v.fecha_captacion.substring(0,7) : '';
+                return ms && (mf === 'todos' || mesCap === mf) && (ef === 'todos' || v.equipo === ef) && (cf === 'todos' || v.comercial === cf) && (cif === 'todos' || v.ciudad === cif);
             });
         }
 
@@ -1001,6 +1011,22 @@
             }).join('');
 
             document.getElementById('stat-ag-total').textContent = filtered.length;
+        }
+
+        function descargarCSVAgendar() {
+            const filtered = getFilteredAgendar();
+            const headers = ['NID','Comercial','Equipo','Ciudad','Fecha Captacion','Telefono','Ultimo Status','Estado Publicacion'];
+            const rows = filtered.map(v => {
+                return [v.nid, v.comercial, v.equipo, v.ciudad, v.fecha_captacion, v.telefono_cliente, v.ultimo_status, v.tipo_fotos].map(c => '"' + (c || '').replace(/"/g, '""') + '"').join(',');
+            });
+            const csv = [headers.join(','), ...rows].join('\n');
+            const blob = new Blob(['\ufeff' + csv], {type: 'text/csv;charset=utf-8;'});
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'por_agendar_' + new Date().toISOString().split('T')[0] + '.csv';
+            a.click();
+            URL.revokeObjectURL(url);
         }
     </script>
 </body>
