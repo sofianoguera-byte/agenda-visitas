@@ -245,7 +245,7 @@ def leer_canceladas_correo(dias=7):
         nids_modified = {}
         try:
             for row in client.query(query_status).result():
-                if row.status in ("Cancelado", "No realizada"):
+                if row.status in ("Cancelado", "No realizada", "Cerrado"):
                     nids_realmente_cancelados.add(str(row.nid))
                 mod = str(row.modified_date) if row.modified_date else ""
                 if mod and "T" in mod:
