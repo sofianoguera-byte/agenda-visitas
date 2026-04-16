@@ -944,6 +944,40 @@
             return clean;
         }
 
+        let pendingDesistirAgNid = null;
+        let pendingDesistirAgComercial = null;
+
+        function desistirAgendar(nid, comercial) {
+            pendingDesistirAgNid = nid;
+            pendingDesistirAgComercial = comercial;
+            document.getElementById('modal-desistir-nid').textContent = nid;
+            document.getElementById('modal-desistir').classList.add('active');
+        }
+
+        // Override confirmarDesistir to handle both canceladas and agendar
+        const originalConfirmarDesistir = confirmarDesistir;
+        confirmarDesistir = async function() {
+            if (pendingDesistirAgNid) {
+                try {
+                    await fetch('https://script.google.com/macros/s/AKfycbyvJCuniSwjN0tb6mfVuEsXwMPnXl9ChAHkhyOk0cK3tkxADBOAo6XQl1-sxKeyzT30Uw/exec', {
+                        method: 'POST',
+                        mode: 'no-cors',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({nid: pendingDesistirAgNid, comercial: pendingDesistirAgComercial})
+                    });
+                } catch (e) { console.error(e); }
+                // Quitar de la lista visual
+                porAgendar = porAgendar.filter(v => v.nid !== pendingDesistirAgNid);
+                cerrarModalDesistir();
+                renderPorAgendar();
+                showToast('NID ' + pendingDesistirAgNid + ' marcado como desistimiento', 'info');
+                pendingDesistirAgNid = null;
+                pendingDesistirAgComercial = null;
+                return;
+            }
+            await originalConfirmarDesistir();
+        };
+
         function renderPorAgendar() {
             const tbody = document.getElementById('tbody-ag');
             const filtered = getFilteredAgendar();
@@ -960,9 +994,10 @@
                     <td style="padding:10px 16px;font-size:13px;">${v.telefono_cliente || 'Sin teléfono'}</td>
                     <td style="padding:10px 16px;font-size:13px;">${v.ultimo_status || 'Sin visita'}</td>
                     <td style="padding:10px 16px;font-size:13px;">${v.tipo_fotos || 'N/A'}</td>
-                    <td style="padding:10px 16px;">
+                    <td style="padding:10px 16px;white-space:nowrap;">
                         <a href="https://visitahabi.bubbleapps.io/home_algoritmo" target="_blank" class="btn btn-sm" style="background:#f59e0b;">Agendar</a>
                         ${phone ? `<a href="https://wa.me/${phone}?text=${encodeURIComponent('Hola, te escribimos de Habi. Queremos agendar la visita de toma de fotografías profesionales de tu inmueble. ¿Qué día y hora te queda bien? Quedamos atentos.')}" target="_blank" class="btn btn-sm btn-whatsapp">WhatsApp</a>` : ''}
+                        <button class="btn btn-sm btn-cancelar" onclick="desistirAgendar('${v.nid}','${v.comercial}')">Desistir</button>
                     </td>
                 </tr>`;
             }).join('');
