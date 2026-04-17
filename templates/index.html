@@ -120,6 +120,7 @@
         <div class="tab" data-tab="canceladas" onclick="switchTab('canceladas')">Canceladas por Reagendar</div>
         <div class="tab" data-tab="publicar" onclick="switchTab('publicar')">Por Publicar</div>
         <div class="tab" data-tab="sinfotos" onclick="switchTab('sinfotos')">Por Publicar Sin Fotos</div>
+        <div class="tab" data-tab="fotoscorreo" onclick="switchTab('fotoscorreo')">Por Publicar Fotos Correo</div>
     </div>
 
     <!-- TAB 1: Visitas de mañana -->
@@ -262,6 +263,42 @@
         </div>
     </div>
 
+    <!-- TAB 6: Por Publicar Fotos Correo -->
+    <div class="tab-content" id="tab-fotoscorreo">
+        <div class="stats-bar">
+            <div class="stat-card"><div class="icon total">&#x1f4e7;</div><div class="info"><h3 id="stat-fc-total">-</h3><p>Total</p></div></div>
+            <div class="stat-card"><div class="icon confirmadas">&#x2705;</div><div class="info"><h3 id="stat-fc-publicados">0</h3><p>Publicados</p></div></div>
+            <div class="stat-card"><div class="icon canceladas">&#x274c;</div><div class="info"><h3 id="stat-fc-nopub">0</h3><p>No publicados</p></div></div>
+            <div class="stat-card"><div class="icon pendientes">&#x23f3;</div><div class="info"><h3 id="stat-fc-pendientes">0</h3><p>Pendientes</p></div></div>
+        </div>
+        <div class="container">
+            <div class="search-bar">
+                <input type="text" id="search-fc" placeholder="Buscar por NID, ciudad, comercial...">
+                <select id="filter-equipo-fc"><option value="todos">Todos los equipos</option></select>
+                <select id="filter-comercial-fc"><option value="todos">Todos los comerciales</option></select>
+            </div>
+            <div id="loading-fc" class="loading"><div class="spinner"></div><p>Cargando inmuebles de correos...</p></div>
+            <div id="table-fc-container" style="display:none;overflow-x:auto;">
+                <table style="width:100%;border-collapse:collapse;background:white;border-radius:12px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.06);">
+                    <thead>
+                        <tr style="background:#2563eb;color:white;text-align:left;">
+                            <th style="padding:12px 16px;font-size:13px;">NID</th>
+                            <th style="padding:12px 16px;font-size:13px;">Comercial</th>
+                            <th style="padding:12px 16px;font-size:13px;">Equipo</th>
+                            <th style="padding:12px 16px;font-size:13px;">Ciudad</th>
+                            <th style="padding:12px 16px;font-size:13px;">Fecha Captación</th>
+                            <th style="padding:12px 16px;font-size:13px;">Patrimonio</th>
+                            <th style="padding:12px 16px;font-size:13px;">Estado</th>
+                            <th style="padding:12px 16px;font-size:13px;">Comentario</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tbody-fc"></tbody>
+                </table>
+            </div>
+            <div id="empty-fc" class="empty-state" style="display:none;"><h2>No hay correos de fotos cliente</h2></div>
+        </div>
+    </div>
+
     <!-- TAB 5: Por Publicar Sin Fotos -->
     <div class="tab-content" id="tab-sinfotos">
         <div class="stats-bar">
@@ -365,6 +402,8 @@
                 pubCommentMap = data.pubComentario || {};
                 sfStatusMap = data.sfEstado || {};
                 sfCommentMap = data.sfComentario || {};
+                fcStatusMap = data.fcEstado || {};
+                fcCommentMap = data.fcComentario || {};
             } catch (e) { console.error('Error cargando estados:', e); }
         }
 
@@ -405,6 +444,7 @@
             if (tab === 'publicar' && !publicarLoaded) fetchPorPublicar();
             if (tab === 'agendar' && !agendarLoaded) fetchPorAgendar();
             if (tab === 'sinfotos' && !sinFotosLoaded) fetchSinFotos();
+            if (tab === 'fotoscorreo' && !fotosCorreoLoaded) fetchFotosCorreo();
         }
 
         // --- Init ---
@@ -1115,6 +1155,106 @@
             a.click();
             URL.revokeObjectURL(url);
         }
+        // ==========================
+        // TAB 6: POR PUBLICAR FOTOS CORREO
+        // ==========================
+        let fotosCorreo = [];
+        let fotosCorreoLoaded = false;
+        let fcStatusMap = {};
+        let fcCommentMap = {};
+
+        document.getElementById('search-fc').addEventListener('input', renderFotosCorreo);
+        document.getElementById('filter-equipo-fc').addEventListener('change', renderFotosCorreo);
+        document.getElementById('filter-comercial-fc').addEventListener('change', renderFotosCorreo);
+
+        async function fetchFotosCorreo() {
+            try {
+                await cargarEstadosCompartidos();
+                fcStatusMap = {};
+                fcCommentMap = {};
+                const res = await fetch('/api/por-publicar-fotos-correo');
+                fotosCorreo = await res.json();
+                fotosCorreoLoaded = true;
+                document.getElementById('loading-fc').style.display = 'none';
+                if (fotosCorreo.length === 0) {
+                    document.getElementById('empty-fc').style.display = 'block';
+                } else {
+                    document.getElementById('table-fc-container').style.display = 'block';
+                    buildFilterOptions(fotosCorreo, 'filter-equipo-fc', 'equipo');
+                    buildFilterOptions(fotosCorreo, 'filter-comercial-fc', 'comercial');
+                    renderFotosCorreo();
+                }
+            } catch (err) {
+                document.getElementById('loading-fc').innerHTML = '<p style="color:#ef4444;">Error al cargar.</p>';
+            }
+        }
+
+        function getFilteredFC() {
+            const search = document.getElementById('search-fc').value.toLowerCase();
+            const ef = document.getElementById('filter-equipo-fc').value;
+            const cf = document.getElementById('filter-comercial-fc').value;
+            return fotosCorreo.filter(v => {
+                const ms = !search || v.nid.includes(search) || v.ciudad.toLowerCase().includes(search) || v.comercial.toLowerCase().includes(search);
+                return ms && (ef === 'todos' || v.equipo === ef) && (cf === 'todos' || v.comercial === cf);
+            });
+        }
+
+        function renderFotosCorreo() {
+            const tbody = document.getElementById('tbody-fc');
+            const filtered = getFilteredFC();
+
+            tbody.innerHTML = filtered.map(v => {
+                const ps = fcStatusMap[v.nid] || 'pendiente';
+                const pc = fcCommentMap[v.nid] || '';
+                const bgColor = ps === 'publicado' ? '#f0fdf4' : ps === 'no_publicado' ? '#fef2f2' : 'white';
+                return `
+                <tr style="border-bottom:1px solid #e5e7eb;background:${bgColor};">
+                    <td style="padding:10px 16px;font-weight:600;font-size:13px;">${v.nid}</td>
+                    <td style="padding:10px 16px;font-size:13px;">${v.comercial || 'N/A'}</td>
+                    <td style="padding:10px 16px;font-size:13px;">${v.equipo || 'N/A'}</td>
+                    <td style="padding:10px 16px;font-size:13px;">${v.ciudad || 'N/A'}</td>
+                    <td style="padding:10px 16px;font-size:13px;">${v.fecha_captacion || 'N/A'}</td>
+                    <td style="padding:10px 16px;font-size:13px;">${v.patrimonio || 'N/A'}</td>
+                    <td style="padding:10px 16px;white-space:nowrap;">
+                        <button class="btn btn-sm ${ps === 'publicado' ? 'btn-confirmar' : ''}" style="${ps !== 'publicado' ? 'background:#e5e7eb;color:#374151;' : ''}padding:5px 10px;font-size:11px;" onclick="toggleFCStatus('${v.nid}','publicado')">Publicado</button>
+                        <button class="btn btn-sm ${ps === 'no_publicado' ? 'btn-cancelar' : ''}" style="${ps !== 'no_publicado' ? 'background:#e5e7eb;color:#374151;' : ''}padding:5px 10px;font-size:11px;" onclick="toggleFCStatus('${v.nid}','no_publicado')">No publicado</button>
+                    </td>
+                    <td style="padding:10px 16px;">
+                        <input type="text" value="${pc}" placeholder="Comentario..." onblur="guardarComentarioFC('${v.nid}', this.value)"
+                            style="width:180px;padding:5px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;outline:none;">
+                    </td>
+                </tr>`;
+            }).join('');
+
+            const total = fotosCorreo.length;
+            let pub = 0, nopub = 0;
+            fotosCorreo.forEach(v => {
+                const s = fcStatusMap[v.nid];
+                if (s === 'publicado') pub++;
+                if (s === 'no_publicado') nopub++;
+            });
+            document.getElementById('stat-fc-total').textContent = total;
+            document.getElementById('stat-fc-publicados').textContent = pub;
+            document.getElementById('stat-fc-nopub').textContent = nopub;
+            document.getElementById('stat-fc-pendientes').textContent = total - pub - nopub;
+        }
+
+        function toggleFCStatus(nid, status) {
+            if (fcStatusMap[nid] === status) {
+                delete fcStatusMap[nid];
+                guardarEstadoPermanente(nid, 'fc:');
+            } else {
+                fcStatusMap[nid] = status;
+                guardarEstadoPermanente(nid, 'fc:' + status);
+            }
+            renderFotosCorreo();
+        }
+
+        function guardarComentarioFC(nid, comentario) {
+            fcCommentMap[nid] = comentario;
+            guardarEstadoPermanente(nid, 'fd:' + comentario);
+        }
+
         // ==========================
         // TAB 5: POR PUBLICAR SIN FOTOS
         // ==========================

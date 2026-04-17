@@ -610,6 +610,71 @@ def api_por_publicar():
         return jsonify([])
 
 
+def leer_nids_fotos_cliente():
+    """Lee NIDs de correos con asunto 'Publicación Fotos cliente'."""
+    nids = []
+    try:
+        mail = imaplib.IMAP4_SSL("imap.gmail.com")
+        mail.login(EMAIL_USER, EMAIL_PASS)
+        mail.select("inbox")
+        status, messages = mail.search(None, 'SUBJECT "Fotos cliente"')
+        ids = messages[0].split()
+        for msg_id in ids:
+            status, data = mail.fetch(msg_id, "(BODY[HEADER.FIELDS (SUBJECT)])")
+            raw = data[0][1].decode("utf-8", errors="replace")
+            # Extraer NID del asunto: buscar secuencia de 8-12 digitos
+            nid_match = re.search(r"(\d{8,12})", raw)
+            if nid_match:
+                nids.append(nid_match.group(1))
+        mail.logout()
+    except Exception as e:
+        print(f"Error leyendo correos fotos cliente: {e}")
+    return list(set(nids))
+
+
+@app.route("/api/por-publicar-fotos-correo")
+def api_por_publicar_fotos_correo():
+    nids_correo = leer_nids_fotos_cliente()
+    if not nids_correo:
+        return jsonify([])
+
+    nids_str = ",".join(f"'{n}'" for n in nids_correo)
+    query = f"""
+    SELECT
+      CAST(cd.nid AS STRING) AS nid,
+      COALESCE(h.hubspot_owner_id, cd.c_comercial_captacion) AS comercial,
+      cd.ciudad,
+      COALESCE(h.equipo_sellers, cd.c_equipo_seller) AS equipo,
+      DATE(cd.c_fecha_captacion) AS fecha_captacion,
+      cd.tel_fono_del_cliente_1 AS telefono_cliente,
+      d.estado_patrimonio
+    FROM `papyrus-data.habi_wh_inmobiliaria.consolidado_habi_inmobiliaria` cd
+    LEFT JOIN `papyrus-delivery-data.inmobiliaria.detalle_estado_captaciones` d ON cd.nid = d.nid
+    LEFT JOIN `papyrus-master.squad_bi_global.hubspot_deal` h
+      ON SAFE_CAST(cd.nid AS INT64) = h.nid AND h.pipeline = '803674753'
+    WHERE CAST(cd.nid AS STRING) IN ({nids_str})
+      AND cd.fecha_desistio_inmobiliaria IS NULL
+      AND (d.estado_patrimonio IS NULL OR d.estado_patrimonio = 'Sin patrimonio')
+    """
+    try:
+        results = client.query(query).result()
+        inmuebles = []
+        for row in results:
+            inmuebles.append({
+                "nid": str(row.nid),
+                "comercial": row.comercial or "",
+                "ciudad": (row.ciudad or "").title(),
+                "equipo": row.equipo or "",
+                "fecha_captacion": str(row.fecha_captacion) if row.fecha_captacion else "",
+                "telefono_cliente": str(row.telefono_cliente) if row.telefono_cliente else "",
+                "patrimonio": row.estado_patrimonio or "Sin info",
+            })
+        return jsonify(inmuebles)
+    except Exception as e:
+        print(f"Error consultando por publicar fotos correo: {e}")
+        return jsonify([])
+
+
 @app.route("/api/por-publicar-sin-fotos")
 def api_por_publicar_sin_fotos():
     query = """
@@ -759,6 +824,8 @@ def obtener_estados():
     pub_comentario = {}
     sf_estado = {}
     sf_comentario = {}
+    fc_estado = {}
+    fc_comentario = {}
 
     for row in leer_sheet_estados():
         nid = row["nid"]
@@ -786,6 +853,10 @@ def obtener_estados():
                 sf_estado[nid] = estado[3:]
             elif estado.startswith("sc:"):
                 sf_comentario[nid] = estado[3:]
+            elif estado.startswith("fc:") and estado[3:]:
+                fc_estado[nid] = estado[3:]
+            elif estado.startswith("fd:"):
+                fc_comentario[nid] = estado[3:]
 
     return jsonify({
         "visita": visita_estados,
@@ -795,6 +866,8 @@ def obtener_estados():
         "pubComentario": pub_comentario,
         "sfEstado": sf_estado,
         "sfComentario": sf_comentario,
+        "fcEstado": fc_estado,
+        "fcComentario": fc_comentario,
     })
 
 
