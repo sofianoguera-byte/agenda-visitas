@@ -226,6 +226,8 @@
     <div class="tab-content" id="tab-agendar">
         <div class="stats-bar">
             <div class="stat-card"><div class="icon total">&#x1f4cb;</div><div class="info"><h3 id="stat-ag-total">-</h3><p>Total por agendar</p></div></div>
+            <div class="stat-card"><div class="icon" style="background:#fef3c7;">&#x1f4f7;</div><div class="info"><h3 id="stat-ag-sinpub">0</h3><p>Sin publicar</p></div></div>
+            <div class="stat-card"><div class="icon" style="background:#dbeafe;">&#x1f5bc;</div><div class="info"><h3 id="stat-ag-confoto">0</h3><p>Publicado sin fotos pro</p></div></div>
         </div>
         <div class="container">
             <div class="search-bar">
@@ -234,6 +236,11 @@
                 <select id="filter-equipo-ag"><option value="todos">Todos los equipos</option></select>
                 <select id="filter-comercial-ag"><option value="todos">Todos los comerciales</option></select>
                 <select id="filter-ciudad-ag"><option value="todos">Todas las ciudades</option></select>
+                <select id="filter-tipofoto-ag">
+                    <option value="todos">Todos los tipos</option>
+                    <option value="Sin publicar">Sin publicar</option>
+                    <option value="Publicado sin fotos profesionales">Publicado sin fotos pro</option>
+                </select>
                 <button class="btn" style="background:#6c3baa;font-size:13px;" onclick="descargarCSVAgendar()">Descargar CSV</button>
             </div>
             <div id="loading-ag" class="loading"><div class="spinner"></div><p>Cargando inmuebles por agendar...</p></div>
@@ -940,6 +947,7 @@
         document.getElementById('filter-equipo-ag').addEventListener('change', renderPorAgendar);
         document.getElementById('filter-comercial-ag').addEventListener('change', renderPorAgendar);
         document.getElementById('filter-ciudad-ag').addEventListener('change', renderPorAgendar);
+        document.getElementById('filter-tipofoto-ag').addEventListener('change', renderPorAgendar);
 
         async function fetchPorAgendar() {
             try {
@@ -972,10 +980,11 @@
             const ef = document.getElementById('filter-equipo-ag').value;
             const cf = document.getElementById('filter-comercial-ag').value;
             const cif = document.getElementById('filter-ciudad-ag').value;
+            const tf = document.getElementById('filter-tipofoto-ag').value;
             return porAgendar.filter(v => {
                 const ms = !search || v.nid.includes(search) || v.ciudad.toLowerCase().includes(search) || v.comercial.toLowerCase().includes(search);
                 const mesCap = v.fecha_captacion ? v.fecha_captacion.substring(0,7) : '';
-                return ms && (mf === 'todos' || mesCap === mf) && (ef === 'todos' || v.equipo === ef) && (cf === 'todos' || v.comercial === cf) && (cif === 'todos' || v.ciudad === cif);
+                return ms && (mf === 'todos' || mesCap === mf) && (ef === 'todos' || v.equipo === ef) && (cf === 'todos' || v.comercial === cf) && (cif === 'todos' || v.ciudad === cif) && (tf === 'todos' || v.tipo_fotos === tf);
             });
         }
 
@@ -1026,8 +1035,12 @@
 
             tbody.innerHTML = filtered.map(v => {
                 const phone = formatPhoneAg(v.telefono_cliente);
+                const esPubSinFotos = v.tipo_fotos === 'Publicado sin fotos profesionales';
+                const tagColor = esPubSinFotos ? 'background:#dbeafe;color:#1e40af;' : 'background:#fef3c7;color:#92400e;';
+                const tagText = esPubSinFotos ? 'Publicado sin fotos' : 'Sin publicar';
+                const rowBg = esPubSinFotos ? '#f0f9ff' : 'white';
                 return `
-                <tr style="border-bottom:1px solid #e5e7eb;">
+                <tr style="border-bottom:1px solid #e5e7eb;background:${rowBg};">
                     <td style="padding:10px 16px;font-weight:600;font-size:13px;">${v.nid}</td>
                     <td style="padding:10px 16px;font-size:13px;">${v.comercial || 'N/A'}</td>
                     <td style="padding:10px 16px;font-size:13px;">${v.equipo || 'N/A'}</td>
@@ -1035,7 +1048,7 @@
                     <td style="padding:10px 16px;font-size:13px;">${v.fecha_captacion || 'N/A'}</td>
                     <td style="padding:10px 16px;font-size:13px;">${v.telefono_cliente || 'Sin teléfono'}</td>
                     <td style="padding:10px 16px;font-size:13px;">${v.ultimo_status || 'Sin visita'}</td>
-                    <td style="padding:10px 16px;font-size:13px;">${v.tipo_fotos || 'N/A'}</td>
+                    <td style="padding:10px 16px;"><span style="padding:4px 10px;border-radius:20px;font-size:11px;font-weight:700;${tagColor}">${tagText}</span></td>
                     <td style="padding:10px 16px;white-space:nowrap;">
                         <a href="https://visitahabi.bubbleapps.io/home_algoritmo" target="_blank" class="btn btn-sm" style="background:#f59e0b;">Agendar</a>
                         ${phone ? `<a href="https://wa.me/${phone}?text=${encodeURIComponent('Hola, te escribimos de Habi. Queremos agendar la visita de toma de fotografías profesionales de tu inmueble. ¿Qué día y hora te queda bien? Quedamos atentos.')}" target="_blank" class="btn btn-sm btn-whatsapp">WhatsApp</a>` : ''}
@@ -1045,6 +1058,13 @@
             }).join('');
 
             document.getElementById('stat-ag-total').textContent = filtered.length;
+            let sinPub = 0, conFoto = 0;
+            filtered.forEach(v => {
+                if (v.tipo_fotos === 'Publicado sin fotos profesionales') conFoto++;
+                else sinPub++;
+            });
+            document.getElementById('stat-ag-sinpub').textContent = sinPub;
+            document.getElementById('stat-ag-confoto').textContent = conFoto;
         }
 
         function descargarCSVAgendar() {
