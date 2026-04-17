@@ -76,12 +76,14 @@ def get_visitas_manana():
         v.nid, v.fecha_fin, v.fecha_inicio, v.ciudad_muni, v.zona,
         v.direccion, v.torre_apto, v.conjunto, v.visit_type, v.visit_category,
         v.nombre_agendador, v.email_agendador, v.nombre_visitador, v.email_visitador,
-        c.c_comercial_captacion,
+        COALESCE(h.hubspot_owner_id, c.c_comercial_captacion) AS c_comercial_captacion,
         c.tel_fono_del_cliente_1 AS telefono_cliente,
-        c.c_equipo_seller AS equipo
+        COALESCE(h.equipo_sellers, c.c_equipo_seller) AS equipo
     FROM visitas_manana v
     LEFT JOIN `papyrus-data.habi_wh_inmobiliaria.consolidado_habi_inmobiliaria` c
         ON v.nid = CAST(c.nid AS STRING)
+    LEFT JOIN `papyrus-master.squad_bi_global.hubspot_deal` h
+        ON SAFE_CAST(v.nid AS INT64) = h.nid AND h.pipeline = '803674753'
     ORDER BY v.fecha_inicio
     """
     try:
@@ -273,16 +275,18 @@ def leer_canceladas_correo(dias=7):
         )
         SELECT nid, fecha_inicio FROM ultimo WHERE rn = 1
         """
-        # 3. Traer comercial + teléfono de consolidado
+        # 3. Traer comercial + teléfono de consolidado + hubspot
         query_consolidado = f"""
         SELECT
             CAST(c.nid AS STRING) AS nid,
-            c.c_comercial_captacion,
+            COALESCE(h.hubspot_owner_id, c.c_comercial_captacion) AS c_comercial_captacion,
             c.tel_fono_del_cliente_1 AS telefono_cliente,
             c.direccion,
             c.ciudad,
-            c.c_equipo_seller AS equipo
+            COALESCE(h.equipo_sellers, c.c_equipo_seller) AS equipo
         FROM `papyrus-data.habi_wh_inmobiliaria.consolidado_habi_inmobiliaria` c
+        LEFT JOIN `papyrus-master.squad_bi_global.hubspot_deal` h
+            ON SAFE_CAST(c.nid AS INT64) = h.nid AND h.pipeline = '803674753'
         WHERE CAST(c.nid AS STRING) IN ({nids_str})
         """
         bq_data = {}
@@ -413,8 +417,8 @@ def api_por_agendar():
     )
     SELECT
       cd.nid,
-      cd.c_comercial_captacion,
-      cd.c_equipo_seller,
+      COALESCE(h.hubspot_owner_id, cd.c_comercial_captacion) AS c_comercial_captacion,
+      COALESCE(h.equipo_sellers, cd.c_equipo_seller) AS c_equipo_seller,
       cd.ciudad,
       DATE(cd.c_fecha_captacion) AS fecha_captacion,
       cd.tel_fono_del_cliente_1 AS telefono_cliente,
@@ -481,7 +485,7 @@ def api_por_publicar():
       WHERE pi.source_image_id = 3
     ),
     base AS (
-      SELECT cd.nid, cd.c_comercial_captacion, cd.ciudad, cd.c_equipo_seller,
+      SELECT cd.nid, COALESCE(h.hubspot_owner_id, cd.c_comercial_captacion) AS c_comercial_captacion, cd.ciudad, COALESCE(h.equipo_sellers, cd.c_equipo_seller) AS c_equipo_seller,
         DATE(SAFE_CAST(NULLIF(b.fecha_inicio, 'nan') AS TIMESTAMP)) AS Fecha_recorrido,
         b.status,
         d.estado_patrimonio,
@@ -611,9 +615,9 @@ def api_por_publicar_sin_fotos():
     query = """
     SELECT
       cd.nid,
-      cd.c_comercial_captacion,
+      COALESCE(h.hubspot_owner_id, cd.c_comercial_captacion) AS c_comercial_captacion,
       cd.ciudad,
-      cd.c_equipo_seller,
+      COALESCE(h.equipo_sellers, cd.c_equipo_seller) AS c_equipo_seller,
       DATE(cd.c_fecha_captacion) AS fecha_captacion,
       cd.tel_fono_del_cliente_1 AS telefono_cliente
     FROM `papyrus-data.habi_wh_inmobiliaria.consolidado_habi_inmobiliaria` cd
