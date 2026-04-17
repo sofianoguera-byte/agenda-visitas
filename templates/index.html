@@ -160,12 +160,8 @@
         <div class="container">
             <div class="search-bar">
                 <input type="text" id="search-cancel" placeholder="Buscar por NID, ciudad o comercial...">
-                <select id="filter-rango-cancel" onchange="cambiarRango()">
-                    <option value="7" selected>Última semana</option>
-                    <option value="14">Últimos 15 días</option>
-                    <option value="30">Último mes</option>
-                    <option value="60">Últimos 2 meses</option>
-                    <option value="90">Últimos 3 meses</option>
+                <select id="filter-rango-cancel" onchange="cambiarRango()" style="display:none;">
+                    <option value="90" selected>Últimos 3 meses</option>
                 </select>
                 <select id="filter-dia-cancel"><option value="todos">Todos los días</option></select>
                 <select id="filter-equipo-cancel"><option value="todos">Todos los equipos</option></select>
@@ -422,7 +418,7 @@
         document.getElementById('search-cancel').addEventListener('input', renderCanceladas);
         document.getElementById('filter-dia-cancel').addEventListener('change', renderCanceladas);
         document.getElementById('filter-equipo-cancel').addEventListener('change', renderCanceladas);
-        document.getElementById('filter-comercial-cancel').addEventListener('change', renderCanceladas);
+        document.getElementById('filter-comercial-cancel').addEventListener('change', onComercialCancelChange);
         document.getElementById('filter-ciudad-cancel').addEventListener('change', renderCanceladas);
 
         // --- Helpers ---
@@ -612,24 +608,37 @@
         function cambiarRango() {
             canceladasLoaded = false;
             canceladas = [];
-            cancelContactMap = {};
             document.getElementById('card-grid-cancel').style.display = 'none';
             document.getElementById('empty-cancel').style.display = 'none';
-            document.getElementById('loading-cancel').style.display = 'block';
-            document.getElementById('loading-cancel').innerHTML = '<div class="spinner"></div><p>Cargando canceladas...</p>';
-            fetchCanceladas();
+            fetchCanceladas(90);
         }
 
-        async function fetchCanceladas() {
+        let canceladas90 = null;  // Cache 90 dias
+        let canceladas365 = null; // Cache 365 dias
+
+        async function fetchCanceladas(dias) {
             try {
                 await cargarEstadosCompartidos();
-                const dias = document.getElementById('filter-rango-cancel').value;
-                const res = await fetch('/api/canceladas?dias=' + dias);
-                const data = await res.json();
+                if (!dias) dias = 90;
+
+                // Usar cache si ya existe
+                let data;
+                if (dias === 90 && canceladas90) {
+                    data = canceladas90;
+                } else if (dias === 365 && canceladas365) {
+                    data = canceladas365;
+                } else {
+                    document.getElementById('loading-cancel').style.display = 'block';
+                    document.getElementById('loading-cancel').innerHTML = '<div class="spinner"></div><p>Cargando canceladas...</p>';
+                    const res = await fetch('/api/canceladas?dias=' + dias);
+                    data = await res.json();
+                    if (dias === 90) canceladas90 = data;
+                    if (dias === 365) canceladas365 = data;
+                }
+
                 canceladas = data.canceladas || [];
                 fechasReporte = data.fechas_reporte || [];
                 document.getElementById('loading-cancel').style.display = 'none';
-                // Agregar canceladas manuales (desde pestaña 1) que no estén ya
                 const nidsExistentes = new Set(canceladas.map(c => c.nid));
                 canceladasManuales.forEach(cm => {
                     if (!nidsExistentes.has(cm.nid)) canceladas.push(cm);
@@ -647,6 +656,21 @@
                 }
             } catch (err) {
                 document.getElementById('loading-cancel').innerHTML = '<p style="color:#ef4444;">Error al cargar canceladas.</p>';
+            }
+        }
+
+        function onComercialCancelChange() {
+            const cf = document.getElementById('filter-comercial-cancel').value;
+            if (cf !== 'todos' && !canceladas365) {
+                // Comercial seleccionado: cargar historico completo
+                fetchCanceladas(365);
+            } else if (cf !== 'todos' && canceladas365) {
+                canceladas = canceladas365.canceladas || [];
+                fechasReporte = canceladas365.fechas_reporte || [];
+                canceladasLoaded = true;
+                renderCanceladas();
+            } else {
+                renderCanceladas();
             }
         }
 
