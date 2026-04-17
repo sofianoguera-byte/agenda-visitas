@@ -640,6 +640,13 @@ def api_por_publicar_fotos_correo():
 
     nids_str = ",".join(f"'{n}'" for n in nids_correo)
     query = f"""
+    WITH tiene_fotos_cliente AS (
+      SELECT DISTINCT pc.nid
+      FROM `papyrus-data.habi_brokers_listing.property_card` pc
+      INNER JOIN `papyrus-data.habi_brokers_listing.property_image` pi
+        ON pc.id = pi.property_card_id
+      WHERE pi.source_image_id = 3
+    )
     SELECT
       CAST(cd.nid AS STRING) AS nid,
       COALESCE(h.hubspot_owner_id, cd.c_comercial_captacion) AS comercial,
@@ -652,9 +659,12 @@ def api_por_publicar_fotos_correo():
     LEFT JOIN `papyrus-delivery-data.inmobiliaria.detalle_estado_captaciones` d ON cd.nid = d.nid
     LEFT JOIN `papyrus-master.squad_bi_global.hubspot_deal` h
       ON SAFE_CAST(cd.nid AS INT64) = h.nid AND h.pipeline = '803674753'
+    LEFT JOIN tiene_fotos_cliente fc ON cd.nid = fc.nid
     WHERE CAST(cd.nid AS STRING) IN ({nids_str})
       AND cd.fecha_desistio_inmobiliaria IS NULL
       AND (d.estado_patrimonio IS NULL OR d.estado_patrimonio = 'Sin patrimonio')
+      AND (cd.date_publication IS NULL OR fc.nid IS NOT NULL)
+      AND (d.date_publication IS NULL OR fc.nid IS NOT NULL)
     """
     try:
         results = client.query(query).result()
