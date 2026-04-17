@@ -620,10 +620,23 @@ def leer_nids_fotos_cliente():
         status, messages = mail.search(None, 'SUBJECT "Fotos cliente"')
         ids = messages[0].split()
         for msg_id in ids:
-            status, data = mail.fetch(msg_id, "(BODY[HEADER.FIELDS (SUBJECT)])")
-            raw = data[0][1].decode("utf-8", errors="replace")
-            # Extraer NID del asunto: buscar secuencia de 8-12 digitos
-            nid_match = re.search(r"(\d{8,12})", raw)
+            status, data = mail.fetch(msg_id, "(RFC822)")
+            msg = email_lib.message_from_bytes(data[0][1])
+            subject = msg["subject"] or ""
+            # Decodificar subject
+            from email.header import decode_header
+            decoded_parts = decode_header(subject)
+            subj = ""
+            for part, enc in decoded_parts:
+                if isinstance(part, bytes):
+                    subj += part.decode(enc or "utf-8", errors="replace")
+                else:
+                    subj += part
+            # Extraer NID de entre parentesis: (58488002593)
+            nid_match = re.search(r"\((\d{8,})\)", subj)
+            if not nid_match:
+                # Fallback: NID al inicio del asunto
+                nid_match = re.search(r"(\d{8,})", subj)
             if nid_match:
                 nids.append(nid_match.group(1))
         mail.logout()
