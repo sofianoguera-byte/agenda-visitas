@@ -765,6 +765,7 @@
             } catch (e) { console.error(e); }
             cancelContactMap[nid] = 'desistido';
             guardarEstadoCompartido(nid, 'cc:desistido');
+            canceladas = canceladas.filter(c => c.nid !== nid);
             cerrarModalDesistir();
             renderCanceladas();
             showToast('NID ' + nid + ' marcado como desistimiento', 'info');
