@@ -627,8 +627,9 @@ def cancelar_visita():
         from email.mime.text import MIMEText
         from email.mime.multipart import MIMEMultipart
         msg = MIMEMultipart()
+        destinatarios = [EMAIL_USER, "mariaalonso@habi.co"]
         msg["From"] = EMAIL_USER
-        msg["To"] = EMAIL_USER
+        msg["To"] = ", ".join(destinatarios)
         msg["Subject"] = asunto
         msg.attach(MIMEText(cuerpo, "plain"))
         with smtplib.SMTP("smtp.gmail.com", 587) as server:
