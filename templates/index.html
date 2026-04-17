@@ -119,6 +119,7 @@
         <div class="tab active" data-tab="visitas" onclick="switchTab('visitas')">Visitas de Mañana</div>
         <div class="tab" data-tab="canceladas" onclick="switchTab('canceladas')">Canceladas por Reagendar</div>
         <div class="tab" data-tab="publicar" onclick="switchTab('publicar')">Por Publicar</div>
+        <div class="tab" data-tab="sinfotos" onclick="switchTab('sinfotos')">Por Publicar Sin Fotos</div>
     </div>
 
     <!-- TAB 1: Visitas de mañana -->
@@ -258,6 +259,49 @@
         </div>
     </div>
 
+    <!-- TAB 5: Por Publicar Sin Fotos -->
+    <div class="tab-content" id="tab-sinfotos">
+        <div class="stats-bar">
+            <div class="stat-card"><div class="icon total">&#x1f4cb;</div><div class="info"><h3 id="stat-sf-total">-</h3><p>Total</p></div></div>
+            <div class="stat-card"><div class="icon confirmadas">&#x2705;</div><div class="info"><h3 id="stat-sf-publicados">0</h3><p>Publicados</p></div></div>
+            <div class="stat-card"><div class="icon canceladas">&#x274c;</div><div class="info"><h3 id="stat-sf-nopub">0</h3><p>No publicados</p></div></div>
+            <div class="stat-card"><div class="icon pendientes">&#x23f3;</div><div class="info"><h3 id="stat-sf-pendientes">0</h3><p>Pendientes</p></div></div>
+        </div>
+        <div class="container">
+            <div class="search-bar">
+                <input type="text" id="search-sf" placeholder="Buscar por NID, ciudad, comercial...">
+                <select id="filter-equipo-sf"><option value="todos">Todos los equipos</option></select>
+                <select id="filter-comercial-sf"><option value="todos">Todos los comerciales</option></select>
+                <select id="filter-estado-sf">
+                    <option value="todos">Todos los estados</option>
+                    <option value="publicado">Publicados</option>
+                    <option value="no_publicado">No publicados</option>
+                    <option value="pendiente">Pendientes</option>
+                </select>
+                <button class="btn" style="background:#6c3baa;font-size:13px;" onclick="descargarCSVSinFotos()">Descargar CSV</button>
+            </div>
+            <div id="loading-sf" class="loading"><div class="spinner"></div><p>Cargando inmuebles sin fotos...</p></div>
+            <div id="table-sf-container" style="display:none;overflow-x:auto;">
+                <table style="width:100%;border-collapse:collapse;background:white;border-radius:12px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.06);">
+                    <thead>
+                        <tr style="background:#e67e22;color:white;text-align:left;">
+                            <th style="padding:12px 16px;font-size:13px;">NID</th>
+                            <th style="padding:12px 16px;font-size:13px;">Comercial</th>
+                            <th style="padding:12px 16px;font-size:13px;">Equipo</th>
+                            <th style="padding:12px 16px;font-size:13px;">Ciudad</th>
+                            <th style="padding:12px 16px;font-size:13px;">Fecha Captación</th>
+                            <th style="padding:12px 16px;font-size:13px;">Teléfono</th>
+                            <th style="padding:12px 16px;font-size:13px;">Estado</th>
+                            <th style="padding:12px 16px;font-size:13px;">Comentario</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tbody-sf"></tbody>
+                </table>
+            </div>
+            <div id="empty-sf" class="empty-state" style="display:none;"><h2>No hay inmuebles sin fotos por publicar</h2></div>
+        </div>
+    </div>
+
     <!-- Modales -->
     <div class="modal-overlay" id="modal-cancelar">
         <div class="modal">
@@ -316,6 +360,8 @@
                 cancelContactMap = data.cancelContacto || {};
                 pubStatusMap = data.pubEstado || {};
                 pubCommentMap = data.pubComentario || {};
+                sfStatusMap = data.sfEstado || {};
+                sfCommentMap = data.sfComentario || {};
             } catch (e) { console.error('Error cargando estados:', e); }
         }
 
@@ -347,6 +393,7 @@
             if (tab === 'canceladas' && !canceladasLoaded) fetchCanceladas();
             if (tab === 'publicar' && !publicarLoaded) fetchPorPublicar();
             if (tab === 'agendar' && !agendarLoaded) fetchPorAgendar();
+            if (tab === 'sinfotos' && !sinFotosLoaded) fetchSinFotos();
         }
 
         // --- Init ---
@@ -1012,6 +1059,128 @@
             const a = document.createElement('a');
             a.href = url;
             a.download = 'por_agendar_' + new Date().toISOString().split('T')[0] + '.csv';
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+        // ==========================
+        // TAB 5: POR PUBLICAR SIN FOTOS
+        // ==========================
+        let sinFotos = [];
+        let sinFotosLoaded = false;
+        let sfStatusMap = {};
+        let sfCommentMap = {};
+
+        document.getElementById('search-sf').addEventListener('input', renderSinFotos);
+        document.getElementById('filter-equipo-sf').addEventListener('change', renderSinFotos);
+        document.getElementById('filter-comercial-sf').addEventListener('change', renderSinFotos);
+        document.getElementById('filter-estado-sf').addEventListener('change', renderSinFotos);
+
+        async function fetchSinFotos() {
+            try {
+                await cargarEstadosCompartidos();
+                sfStatusMap = {};
+                sfCommentMap = {};
+                // Extraer estados sf: del estado compartido
+                for (const [nid, val] of Object.entries(pubStatusMap)) {
+                    // pubStatusMap ya tiene los ps: globales, usaremos sf: para esta pestaña
+                }
+                const res = await fetch('/api/por-publicar-sin-fotos');
+                sinFotos = await res.json();
+                sinFotosLoaded = true;
+                document.getElementById('loading-sf').style.display = 'none';
+                if (sinFotos.length === 0) {
+                    document.getElementById('empty-sf').style.display = 'block';
+                } else {
+                    document.getElementById('table-sf-container').style.display = 'block';
+                    buildFilterOptions(sinFotos, 'filter-equipo-sf', 'equipo');
+                    buildFilterOptions(sinFotos, 'filter-comercial-sf', 'comercial');
+                    renderSinFotos();
+                }
+            } catch (err) {
+                document.getElementById('loading-sf').innerHTML = '<p style="color:#ef4444;">Error al cargar.</p>';
+            }
+        }
+
+        function getFilteredSF() {
+            const search = document.getElementById('search-sf').value.toLowerCase();
+            const ef = document.getElementById('filter-equipo-sf').value;
+            const cf = document.getElementById('filter-comercial-sf').value;
+            const sf = document.getElementById('filter-estado-sf').value;
+            return sinFotos.filter(v => {
+                const ms = !search || v.nid.includes(search) || v.ciudad.toLowerCase().includes(search) || v.comercial.toLowerCase().includes(search);
+                const ps = sfStatusMap[v.nid] || 'pendiente';
+                return ms && (ef === 'todos' || v.equipo === ef) && (cf === 'todos' || v.comercial === cf) && (sf === 'todos' || ps === sf);
+            });
+        }
+
+        function renderSinFotos() {
+            const tbody = document.getElementById('tbody-sf');
+            const filtered = getFilteredSF();
+
+            tbody.innerHTML = filtered.map(v => {
+                const ps = sfStatusMap[v.nid] || 'pendiente';
+                const pc = sfCommentMap[v.nid] || '';
+                const bgColor = ps === 'publicado' ? '#f0fdf4' : ps === 'no_publicado' ? '#fef2f2' : 'white';
+                return `
+                <tr style="border-bottom:1px solid #e5e7eb;background:${bgColor};">
+                    <td style="padding:10px 16px;font-weight:600;font-size:13px;">${v.nid}</td>
+                    <td style="padding:10px 16px;font-size:13px;">${v.comercial || 'N/A'}</td>
+                    <td style="padding:10px 16px;font-size:13px;">${v.equipo || 'N/A'}</td>
+                    <td style="padding:10px 16px;font-size:13px;">${v.ciudad || 'N/A'}</td>
+                    <td style="padding:10px 16px;font-size:13px;">${v.fecha_captacion || 'N/A'}</td>
+                    <td style="padding:10px 16px;font-size:13px;">${v.telefono_cliente || 'Sin teléfono'}</td>
+                    <td style="padding:10px 16px;white-space:nowrap;">
+                        <button class="btn btn-sm ${ps === 'publicado' ? 'btn-confirmar' : ''}" style="${ps !== 'publicado' ? 'background:#e5e7eb;color:#374151;' : ''}padding:5px 10px;font-size:11px;" onclick="toggleSFStatus('${v.nid}','publicado')">Publicado</button>
+                        <button class="btn btn-sm ${ps === 'no_publicado' ? 'btn-cancelar' : ''}" style="${ps !== 'no_publicado' ? 'background:#e5e7eb;color:#374151;' : ''}padding:5px 10px;font-size:11px;" onclick="toggleSFStatus('${v.nid}','no_publicado')">No publicado</button>
+                    </td>
+                    <td style="padding:10px 16px;">
+                        <input type="text" value="${pc}" placeholder="Comentario..." onblur="guardarComentarioSF('${v.nid}', this.value)"
+                            style="width:180px;padding:5px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;outline:none;">
+                    </td>
+                </tr>`;
+            }).join('');
+
+            const total = sinFotos.length;
+            let pub = 0, nopub = 0;
+            sinFotos.forEach(v => {
+                const s = sfStatusMap[v.nid];
+                if (s === 'publicado') pub++;
+                if (s === 'no_publicado') nopub++;
+            });
+            document.getElementById('stat-sf-total').textContent = total;
+            document.getElementById('stat-sf-publicados').textContent = pub;
+            document.getElementById('stat-sf-nopub').textContent = nopub;
+            document.getElementById('stat-sf-pendientes').textContent = total - pub - nopub;
+        }
+
+        function toggleSFStatus(nid, status) {
+            if (sfStatusMap[nid] === status) {
+                delete sfStatusMap[nid];
+                guardarEstadoCompartido(nid, 'sf:');
+            } else {
+                sfStatusMap[nid] = status;
+                guardarEstadoCompartido(nid, 'sf:' + status);
+            }
+            renderSinFotos();
+        }
+
+        function guardarComentarioSF(nid, comentario) {
+            sfCommentMap[nid] = comentario;
+            guardarEstadoCompartido(nid, 'sc:' + comentario);
+        }
+
+        function descargarCSVSinFotos() {
+            const filtered = getFilteredSF();
+            const headers = ['NID','Comercial','Equipo','Ciudad','Fecha Captacion','Telefono','Estado','Comentario'];
+            const rows = filtered.map(v => {
+                return [v.nid, v.comercial, v.equipo, v.ciudad, v.fecha_captacion, v.telefono_cliente, sfStatusMap[v.nid] || 'pendiente', sfCommentMap[v.nid] || ''].map(c => '"' + (c || '').replace(/"/g, '""') + '"').join(',');
+            });
+            const csv = [headers.join(','), ...rows].join('\n');
+            const blob = new Blob(['\ufeff' + csv], {type: 'text/csv;charset=utf-8;'});
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'por_publicar_sin_fotos_' + new Date().toISOString().split('T')[0] + '.csv';
             a.click();
             URL.revokeObjectURL(url);
         }

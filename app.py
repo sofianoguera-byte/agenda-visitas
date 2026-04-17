@@ -606,6 +606,50 @@ def api_por_publicar():
         return jsonify([])
 
 
+@app.route("/api/por-publicar-sin-fotos")
+def api_por_publicar_sin_fotos():
+    query = """
+    SELECT
+      cd.nid,
+      cd.c_comercial_captacion,
+      cd.ciudad,
+      cd.c_equipo_seller,
+      DATE(cd.c_fecha_captacion) AS fecha_captacion,
+      cd.tel_fono_del_cliente_1 AS telefono_cliente
+    FROM `papyrus-data.habi_wh_inmobiliaria.consolidado_habi_inmobiliaria` cd
+    LEFT JOIN `papyrus-master.squad_bi_global.hubspot_deal` h
+      ON SAFE_CAST(cd.nid AS INT64) = h.nid AND h.pipeline = '803674753'
+    WHERE cd.c_fecha_captacion IS NOT NULL
+      AND cd.fecha_desistio_inmobiliaria IS NULL
+      AND h.fecha_desistio_inmobiliaria IS NULL
+      AND cd.date_publication IS NULL
+      AND cd.v_fecha_venta IS NULL
+      AND dealstage != '1182117639'
+    ORDER BY cd.c_fecha_captacion DESC
+    """
+    try:
+        results = client.query(query).result()
+        inmuebles = []
+        seen = set()
+        for row in results:
+            nid = str(row.nid) if row.nid else ""
+            if nid in seen:
+                continue
+            seen.add(nid)
+            inmuebles.append({
+                "nid": nid,
+                "comercial": row.c_comercial_captacion or "",
+                "ciudad": (row.ciudad or "").title(),
+                "equipo": row.c_equipo_seller or "",
+                "fecha_captacion": str(row.fecha_captacion) if row.fecha_captacion else "",
+                "telefono_cliente": str(row.telefono_cliente) if row.telefono_cliente else "",
+            })
+        return jsonify(inmuebles)
+    except Exception as e:
+        print(f"Error consultando por publicar sin fotos: {e}")
+        return jsonify([])
+
+
 @app.route("/api/cancelar", methods=["POST"])
 def cancelar_visita():
     data = request.json
@@ -709,6 +753,8 @@ def obtener_estados():
     cancel_contacto = {}
     pub_estado = {}
     pub_comentario = {}
+    sf_estado = {}
+    sf_comentario = {}
 
     for row in leer_sheet_estados():
         nid = row["nid"]
@@ -725,6 +771,10 @@ def obtener_estados():
             pub_estado[nid] = estado[3:]
         elif estado.startswith("pc:"):
             pub_comentario[nid] = estado[3:]
+        elif estado.startswith("sf:"):
+            sf_estado[nid] = estado[3:]
+        elif estado.startswith("sc:"):
+            sf_comentario[nid] = estado[3:]
         else:
             visita_estados[nid] = estado
 
@@ -734,6 +784,8 @@ def obtener_estados():
         "cancelContacto": cancel_contacto,
         "pubEstado": pub_estado,
         "pubComentario": pub_comentario,
+        "sfEstado": sf_estado,
+        "sfComentario": sf_comentario,
     })
 
 
