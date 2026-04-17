@@ -760,23 +760,28 @@ def obtener_estados():
         nid = row["nid"]
         f = row["fecha"]
         estado = row["estado"]
-        if not nid or f != fecha or not estado:
+        if not nid or not estado:
             continue
 
-        if estado.startswith("wa:"):
-            whatsapp[nid] = True
-        elif estado.startswith("cc:"):
-            cancel_contacto[nid] = estado[3:]
-        elif estado.startswith("ps:"):
-            pub_estado[nid] = estado[3:]
-        elif estado.startswith("pc:"):
-            pub_comentario[nid] = estado[3:]
-        elif estado.startswith("sf:"):
-            sf_estado[nid] = estado[3:]
-        elif estado.startswith("sc:"):
-            sf_comentario[nid] = estado[3:]
-        else:
-            visita_estados[nid] = estado
+        # Estados diarios (visitas, whatsapp, canceladas)
+        if f == fecha:
+            if estado.startswith("wa:"):
+                whatsapp[nid] = True
+            elif estado.startswith("cc:"):
+                cancel_contacto[nid] = estado[3:]
+            elif not estado.startswith(("ps:", "pc:", "sf:", "sc:")):
+                visita_estados[nid] = estado
+
+        # Estados permanentes (publicar, sin fotos)
+        if f == "perm":
+            if estado.startswith("ps:") and estado[3:]:
+                pub_estado[nid] = estado[3:]
+            elif estado.startswith("pc:"):
+                pub_comentario[nid] = estado[3:]
+            elif estado.startswith("sf:") and estado[3:]:
+                sf_estado[nid] = estado[3:]
+            elif estado.startswith("sc:"):
+                sf_comentario[nid] = estado[3:]
 
     return jsonify({
         "visita": visita_estados,

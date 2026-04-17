@@ -380,6 +380,14 @@
             });
         }
 
+        function guardarEstadoPermanente(nid, estado) {
+            fetch('/api/guardar-estado', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({nid, fecha: 'perm', estado})
+            });
+        }
+
         function marcarWhatsApp(nid) {
             whatsappMap[nid] = true;
             guardarEstadoCompartido(nid, 'wa:true');
@@ -908,10 +916,10 @@
         function togglePubStatus(nid, status) {
             if (pubStatusMap[nid] === status) {
                 delete pubStatusMap[nid];
-                guardarEstadoCompartido(nid, 'ps:');
+                guardarEstadoPermanente(nid, 'ps:');
             } else {
                 pubStatusMap[nid] = status;
-                guardarEstadoCompartido(nid, 'ps:' + status);
+                guardarEstadoPermanente(nid, 'ps:' + status);
             }
             renderPorPublicar();
         }
@@ -934,7 +942,7 @@
 
         function guardarComentario(nid, comentario) {
             pubCommentMap[nid] = comentario;
-            guardarEstadoCompartido(nid, 'pc:' + comentario);
+            guardarEstadoPermanente(nid, 'pc:' + comentario);
         }
         // ==========================
         // TAB 4: POR AGENDAR
@@ -1176,17 +1184,17 @@
         function toggleSFStatus(nid, status) {
             if (sfStatusMap[nid] === status) {
                 delete sfStatusMap[nid];
-                guardarEstadoCompartido(nid, 'sf:');
+                guardarEstadoPermanente(nid, 'sf:');
             } else {
                 sfStatusMap[nid] = status;
-                guardarEstadoCompartido(nid, 'sf:' + status);
+                guardarEstadoPermanente(nid, 'sf:' + status);
             }
             renderSinFotos();
         }
 
         function guardarComentarioSF(nid, comentario) {
             sfCommentMap[nid] = comentario;
-            guardarEstadoCompartido(nid, 'sc:' + comentario);
+            guardarEstadoPermanente(nid, 'sc:' + comentario);
         }
 
         function descargarCSVSinFotos() {
