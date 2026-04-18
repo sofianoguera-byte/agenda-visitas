@@ -439,6 +439,7 @@ def api_por_agendar():
       AND (d.date_publication IS NULL OR fc.nid IS NOT NULL)
       AND CAST(cd.nid AS STRING) NOT IN (SELECT nid FROM nids_con_finalizado)
       AND (b.nid IS NULL OR b.status NOT IN ('Agendado', 'Cerrado'))
+      AND (d.estado_patrimonio IS NULL OR d.estado_patrimonio = 'Sin patrimonio')
     ORDER BY cd.c_fecha_captacion DESC
     """
     try:
