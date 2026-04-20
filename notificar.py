@@ -93,10 +93,21 @@ def notificar_visitas_manana():
 
 
 def notificar_canceladas_reagendar():
-    """Notifica solo si hubo cancelaciones nuevas ayer. Incluye resumen de pendientes de la semana."""
-    ayer = get_fecha_ayer()
-    primer_dia_mes = datetime.now().strftime("%Y-%m-01")
-    print(f"\n[{datetime.now()}] === CANCELADAS POR REAGENDAR (nuevas de {ayer} + pendientes del mes) ===")
+    """Notifica cancelaciones. Lunes busca ultimos 3 dias, resto solo ayer. No envia sabados ni domingos."""
+    hoy = datetime.now()
+    dia_semana = hoy.weekday()  # 0=lunes, 5=sabado, 6=domingo
+
+    # No enviar sabados ni domingos
+    if dia_semana in (5, 6):
+        print(f"\n[{hoy}] Fin de semana, no se envian correos de canceladas.")
+        return
+
+    # Lunes: buscar ultimos 3 dias (viernes, sabado, domingo)
+    # Resto: buscar solo ayer
+    dias_atras = 3 if dia_semana == 0 else 1
+    fecha_desde_nuevas = (hoy - timedelta(days=dias_atras)).strftime("%Y-%m-%d")
+    primer_dia_mes = hoy.strftime("%Y-%m-01")
+    print(f"\n[{hoy}] === CANCELADAS POR REAGENDAR (nuevas desde {fecha_desde_nuevas} + pendientes del mes) ===")
 
     query = f"""
     WITH ultimo_registro AS (
@@ -109,10 +120,10 @@ def notificar_canceladas_reagendar():
     canceladas AS (
         SELECT nid, fecha_inicio AS fecha_agendada, modified_date, nombre_agendador, email_agendador, status
         FROM ultimo_registro
-        WHERE rn = 1 AND status IN ('Cancelado', 'No realizada')
+        WHERE rn = 1 AND status IN ('Cancelado', 'No realizada', 'Cerrado')
     )
     SELECT v.*, c.c_comercial_captacion,
-        CASE WHEN v.modified_date LIKE '{ayer}%' THEN 'nueva' ELSE 'pendiente' END AS tipo
+        CASE WHEN v.modified_date >= '{fecha_desde_nuevas}' THEN 'nueva' ELSE 'pendiente' END AS tipo
     FROM canceladas v
     LEFT JOIN `papyrus-data.habi_wh_inmobiliaria.consolidado_habi_inmobiliaria` c
         ON v.nid = CAST(c.nid AS STRING)
@@ -269,10 +280,15 @@ def resumen_maria_jose():
 
 
 def main_9am():
-    """Se ejecuta a las 9 AM."""
+    """Se ejecuta a las 9:15 AM. Solo visitas de mañana."""
     notificar_visitas_manana()
+    print(f"\n[{datetime.now()}] Proceso 9:15 AM completado.")
+
+
+def main_12pm():
+    """Se ejecuta a las 12 PM. Canceladas de ayer (después de recibir correo de cleaning)."""
     notificar_canceladas_reagendar()
-    print(f"\n[{datetime.now()}] Proceso 9 AM completado.")
+    print(f"\n[{datetime.now()}] Proceso 12 PM completado.")
 
 
 def main_5pm():
@@ -283,7 +299,9 @@ def main_5pm():
 
 if __name__ == "__main__":
     import sys
-    if len(sys.argv) > 1 and sys.argv[1] == "5pm":
+    if len(sys.argv) > 1 and sys.argv[1] == "12pm":
+        main_12pm()
+    elif len(sys.argv) > 1 and sys.argv[1] == "5pm":
         main_5pm()
     else:
         main_9am()
