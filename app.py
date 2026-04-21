@@ -485,6 +485,13 @@ def api_por_publicar():
         ON pc.id = pi.property_card_id
       WHERE pi.source_image_id = 3
     ),
+    tiene_fotos_360 AS (
+      SELECT DISTINCT pc.nid
+      FROM `papyrus-data.habi_brokers_listing.property_card` pc
+      INNER JOIN `papyrus-data.habi_brokers_listing.property_image` pi
+        ON pc.id = pi.property_card_id
+      WHERE pi.source_image_id = 1
+    ),
     base AS (
       SELECT cd.nid, COALESCE(h.hubspot_owner_id, cd.c_comercial_captacion) AS c_comercial_captacion, cd.ciudad, COALESCE(h.equipo_sellers, cd.c_equipo_seller) AS c_equipo_seller,
         DATE(SAFE_CAST(NULLIF(b.fecha_inicio, 'nan') AS TIMESTAMP)) AS Fecha_recorrido,
@@ -501,12 +508,14 @@ def api_por_publicar():
       LEFT JOIN `papyrus-master.squad_bi_global.hubspot_deal` h
         ON SAFE_CAST(cd.nid AS INT64) = h.nid AND h.pipeline = '803674753'
       LEFT JOIN tiene_fotos_cliente fc ON cd.nid = fc.nid
+      LEFT JOIN tiene_fotos_360 f360 ON cd.nid = f360.nid
       WHERE cd.fecha_desistio_inmobiliaria IS NULL
         AND h.fecha_desistio_inmobiliaria IS NULL
         AND dealstage != '1182117639'
         AND cd.c_fecha_captacion IS NOT NULL
         AND d.estado_patrimonio = 'Sin patrimonio'
         AND b.status = 'Finalizado'
+        AND f360.nid IS NULL
         AND (d.date_publication IS NULL OR fc.nid IS NOT NULL)
         AND (cd.date_publication IS NULL OR fc.nid IS NOT NULL)
         AND cd.v_fecha_venta IS NULL
@@ -566,7 +575,7 @@ def api_por_publicar():
               FROM `papyrus-data.habi_brokers_listing.property_card` pc3
               INNER JOIN `papyrus-data.habi_brokers_listing.property_image` pi3
                 ON pc3.id = pi3.property_card_id
-              WHERE pi3.source_image_id != 3
+              WHERE pi3.source_image_id = 1
             ) fp ON cd.nid = fp.nid
             WHERE CAST(cd.nid AS STRING) IN ({nids_str})
               AND cd.fecha_desistio_inmobiliaria IS NULL
@@ -660,6 +669,13 @@ def api_por_publicar_fotos_correo():
       INNER JOIN `papyrus-data.habi_brokers_listing.property_image` pi
         ON pc.id = pi.property_card_id
       WHERE pi.source_image_id = 3
+    ),
+    tiene_fotos_360 AS (
+      SELECT DISTINCT pc.nid
+      FROM `papyrus-data.habi_brokers_listing.property_card` pc
+      INNER JOIN `papyrus-data.habi_brokers_listing.property_image` pi
+        ON pc.id = pi.property_card_id
+      WHERE pi.source_image_id = 1
     )
     SELECT
       CAST(cd.nid AS STRING) AS nid,
@@ -674,8 +690,10 @@ def api_por_publicar_fotos_correo():
     LEFT JOIN `papyrus-master.squad_bi_global.hubspot_deal` h
       ON SAFE_CAST(cd.nid AS INT64) = h.nid AND h.pipeline = '803674753'
     LEFT JOIN tiene_fotos_cliente fc ON cd.nid = fc.nid
+    LEFT JOIN tiene_fotos_360 f360 ON cd.nid = f360.nid
     WHERE CAST(cd.nid AS STRING) IN ({nids_str})
       AND cd.fecha_desistio_inmobiliaria IS NULL
+      AND f360.nid IS NULL
       AND (d.estado_patrimonio IS NULL OR d.estado_patrimonio = 'Sin patrimonio')
       AND (cd.date_publication IS NULL OR fc.nid IS NOT NULL)
       AND (d.date_publication IS NULL OR fc.nid IS NOT NULL)
@@ -702,6 +720,21 @@ def api_por_publicar_fotos_correo():
 @app.route("/api/por-publicar-sin-fotos")
 def api_por_publicar_sin_fotos():
     query = """
+    WITH bubble_unica AS (
+      SELECT * FROM (
+        SELECT b.nid, b.status,
+          ROW_NUMBER() OVER (PARTITION BY b.nid ORDER BY b.modified_date DESC) AS rn
+        FROM `papyrus-master.bubble_gold.mart_bubble_schedule_co` b
+        WHERE b.visit_category = 'Habi Inmobiliaria'
+      ) WHERE rn = 1
+    ),
+    tiene_fotos_360 AS (
+      SELECT DISTINCT pc.nid
+      FROM `papyrus-data.habi_brokers_listing.property_card` pc
+      INNER JOIN `papyrus-data.habi_brokers_listing.property_image` pi
+        ON pc.id = pi.property_card_id
+      WHERE pi.source_image_id = 1
+    )
     SELECT
       cd.nid,
       COALESCE(h.hubspot_owner_id, cd.c_comercial_captacion) AS c_comercial_captacion,
@@ -712,12 +745,16 @@ def api_por_publicar_sin_fotos():
     FROM `papyrus-data.habi_wh_inmobiliaria.consolidado_habi_inmobiliaria` cd
     LEFT JOIN `papyrus-master.squad_bi_global.hubspot_deal` h
       ON SAFE_CAST(cd.nid AS INT64) = h.nid AND h.pipeline = '803674753'
+    LEFT JOIN bubble_unica b ON CAST(cd.nid AS STRING) = b.nid
+    LEFT JOIN tiene_fotos_360 f360 ON cd.nid = f360.nid
     WHERE cd.c_fecha_captacion IS NOT NULL
       AND cd.fecha_desistio_inmobiliaria IS NULL
       AND h.fecha_desistio_inmobiliaria IS NULL
       AND cd.date_publication IS NULL
       AND cd.v_fecha_venta IS NULL
       AND dealstage != '1182117639'
+      AND f360.nid IS NULL
+      AND (b.nid IS NULL OR b.status != 'Finalizado')
     ORDER BY cd.c_fecha_captacion DESC
     """
     try:
