@@ -247,7 +247,10 @@ def leer_canceladas_correo(dias=7):
         nids_modified = {}
         try:
             for row in client.query(query_status).result():
-                if row.status in ("Cancelado", "No realizada", "Cerrado"):
+                # 'Cerrado' NO se considera cancelado: si el ultimo estado es
+                # Cerrado (tipicamente viene de Agendado), la visita esta
+                # consolidada para realizarse, no cancelada.
+                if row.status in ("Cancelado", "No realizada"):
                     nids_realmente_cancelados.add(str(row.nid))
                 mod = str(row.modified_date) if row.modified_date else ""
                 if mod and "T" in mod:
