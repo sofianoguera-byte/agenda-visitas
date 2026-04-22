@@ -441,8 +441,18 @@ def api_por_agendar():
     WHERE cd.c_fecha_captacion IS NOT NULL
       AND cd.fecha_desistio_inmobiliaria IS NULL
       AND h.fecha_desistio_inmobiliaria IS NULL
+      AND cd.v_fecha_venta IS NULL
       AND dealstage != '1182117639'
-      AND (d.date_publication IS NULL OR fc.nid IS NOT NULL)
+      -- Publicacion (fuente: consolidado_habi_inmobiliaria.date_publication):
+      --  * sin publicar => incluir
+      --  * publicado >= 2026-04-13 con fotos de cliente (source_image_id = 3) => incluir
+      --  * publicado antes del 13-abr => excluir
+      --    (antes del 13-abr todo se publicaba con fotos 360 profesionales,
+      --     excepto Jamundi que va aparte por el filtro de ciudad)
+      AND (
+        cd.date_publication IS NULL
+        OR (fc.nid IS NOT NULL AND DATE(cd.date_publication) >= DATE '2026-04-13')
+      )
       AND CAST(cd.nid AS STRING) NOT IN (SELECT nid FROM nids_con_finalizado)
       AND (b.nid IS NULL OR b.status NOT IN ('Agendado', 'Cerrado'))
       -- El unico bloqueante es patrimonio de familia con hijos menores.
