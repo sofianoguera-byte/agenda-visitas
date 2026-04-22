@@ -445,11 +445,16 @@ def api_por_agendar():
       AND (d.date_publication IS NULL OR fc.nid IS NOT NULL)
       AND CAST(cd.nid AS STRING) NOT IN (SELECT nid FROM nids_con_finalizado)
       AND (b.nid IS NULL OR b.status NOT IN ('Agendado', 'Cerrado'))
+      -- El unico bloqueante es patrimonio de familia con hijos menores.
+      -- Hipoteca, afectacion familiar sin menores, etc. NO bloquean.
       AND (
+        -- Caso A: tabla oficial de estado_patrimonio marca que no hay patrimonio activo
         d.estado_patrimonio IN ('Sin patrimonio', 'Patrimonio levantado')
+        -- Caso B: sin registro en esa tabla, usamos gravamenes_del_apartamento como fallback
         OR (
           d.estado_patrimonio IS NULL
-          AND (gs.gravamen = 'Ninguno' OR gs.gravamen IS NULL)
+          AND (gs.gravamen IS NULL
+               OR gs.gravamen NOT IN ('Hipoteca + Patrimonio con hijos', 'Patrimonio hijos'))
         )
       )
       AND LOWER(COALESCE(cd.ciudad, '')) NOT LIKE '%jamundi%'
