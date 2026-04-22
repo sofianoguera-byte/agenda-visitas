@@ -414,6 +414,11 @@ def api_por_agendar():
       FROM `papyrus-master.bubble_gold.mart_bubble_schedule_co`
       WHERE visit_category = 'Habi Inmobiliaria'
         AND status = 'Finalizado'
+    ),
+    gravamen_sellers AS (
+      SELECT nid, ANY_VALUE(gravamenes_del_apartamento) AS gravamen
+      FROM `papyrus-data.habi_wh_inmobiliaria.habiinmobiliaria_sellers_gestion`
+      GROUP BY nid
     )
     SELECT
       cd.nid,
@@ -432,6 +437,7 @@ def api_por_agendar():
     LEFT JOIN `papyrus-master.squad_bi_global.hubspot_deal` h
       ON SAFE_CAST(cd.nid AS INT64) = h.nid AND h.pipeline = '803674753'
     LEFT JOIN tiene_fotos_cliente fc ON cd.nid = fc.nid
+    LEFT JOIN gravamen_sellers gs ON cd.nid = gs.nid
     WHERE cd.c_fecha_captacion IS NOT NULL
       AND cd.fecha_desistio_inmobiliaria IS NULL
       AND h.fecha_desistio_inmobiliaria IS NULL
@@ -439,7 +445,15 @@ def api_por_agendar():
       AND (d.date_publication IS NULL OR fc.nid IS NOT NULL)
       AND CAST(cd.nid AS STRING) NOT IN (SELECT nid FROM nids_con_finalizado)
       AND (b.nid IS NULL OR b.status NOT IN ('Agendado', 'Cerrado'))
-      AND (d.estado_patrimonio IS NULL OR d.estado_patrimonio = 'Sin patrimonio')
+      AND (
+        d.estado_patrimonio IN ('Sin patrimonio', 'Patrimonio levantado')
+        OR (
+          d.estado_patrimonio IS NULL
+          AND (gs.gravamen = 'Ninguno' OR gs.gravamen IS NULL)
+        )
+      )
+      AND LOWER(COALESCE(cd.ciudad, '')) NOT LIKE '%jamundi%'
+      AND LOWER(COALESCE(cd.ciudad, '')) NOT LIKE '%jamundí%'
     ORDER BY cd.c_fecha_captacion DESC
     """
     try:
