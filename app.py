@@ -766,6 +766,11 @@ def api_por_publicar_sin_fotos():
       INNER JOIN `papyrus-data.habi_brokers_listing.property_image` pi
         ON pc.id = pi.property_card_id
       WHERE pi.source_image_id = 1
+    ),
+    gravamen_sellers AS (
+      SELECT nid, ANY_VALUE(gravamenes_del_apartamento) AS gravamen
+      FROM `papyrus-data.habi_wh_inmobiliaria.habiinmobiliaria_sellers_gestion`
+      GROUP BY nid
     )
     SELECT
       cd.nid,
@@ -779,6 +784,8 @@ def api_por_publicar_sin_fotos():
       ON SAFE_CAST(cd.nid AS INT64) = h.nid AND h.pipeline = '803674753'
     LEFT JOIN bubble_unica b ON CAST(cd.nid AS STRING) = b.nid
     LEFT JOIN tiene_fotos_360 f360 ON cd.nid = f360.nid
+    LEFT JOIN `papyrus-delivery-data.inmobiliaria.detalle_estado_captaciones` d ON cd.nid = d.nid
+    LEFT JOIN gravamen_sellers gs ON cd.nid = gs.nid
     WHERE cd.c_fecha_captacion IS NOT NULL
       AND cd.fecha_desistio_inmobiliaria IS NULL
       AND h.fecha_desistio_inmobiliaria IS NULL
@@ -787,6 +794,16 @@ def api_por_publicar_sin_fotos():
       AND dealstage != '1182117639'
       AND f360.nid IS NULL
       AND (b.nid IS NULL OR b.status != 'Finalizado')
+      -- Excluye patrimonio de familia con hijos menores activo.
+      -- Si ya se levanto (estado_patrimonio = 'Patrimonio levantado') o nunca hubo, pasa.
+      AND (
+        d.estado_patrimonio IN ('Sin patrimonio', 'Patrimonio levantado')
+        OR (
+          d.estado_patrimonio IS NULL
+          AND (gs.gravamen IS NULL
+               OR gs.gravamen NOT IN ('Hipoteca + Patrimonio con hijos', 'Patrimonio hijos'))
+        )
+      )
     ORDER BY cd.c_fecha_captacion DESC
     """
     try:
