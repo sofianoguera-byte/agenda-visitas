@@ -114,6 +114,43 @@ def get_visitas_manana():
         return []
 
 
+_MESES_REPORTE = {
+    "enero": 1, "febrero": 2, "marzo": 3, "abril": 4, "mayo": 5, "junio": 6,
+    "julio": 7, "agosto": 8, "septiembre": 9, "octubre": 10, "noviembre": 11, "diciembre": 12,
+}
+
+
+def _parse_fecha_reporte_to_date(fecha_str):
+    """Convierte '23 de abril' a datetime.date usando el año actual (o año anterior si el mes ya pasó hace tiempo)."""
+    if not fecha_str:
+        return None
+    m = re.match(r"(\d+)\s+de\s+([a-záéíóúñ]+)", fecha_str.lower().strip())
+    if not m:
+        return None
+    dia = int(m.group(1))
+    mes_nombre = m.group(2)
+    # tolera typos comparando letras ordenadas
+    mes_num = _MESES_REPORTE.get(mes_nombre)
+    if not mes_num:
+        key = "".join(sorted(mes_nombre))
+        for nombre, num in _MESES_REPORTE.items():
+            if "".join(sorted(nombre)) == key:
+                mes_num = num
+                break
+    if not mes_num:
+        return None
+    hoy = datetime.now().date()
+    anio = hoy.year
+    try:
+        candidato = datetime(anio, mes_num, dia).date()
+    except ValueError:
+        return None
+    # si el reporte sale como futuro, usar año anterior
+    if candidato > hoy + timedelta(days=2):
+        candidato = datetime(anio - 1, mes_num, dia).date()
+    return candidato
+
+
 def parsear_correo_completo(msg):
     """Extrae todos los NIDs del correo, separados en completados y cancelados."""
     body = ""
@@ -222,6 +259,9 @@ def leer_canceladas_correo(dias=7):
             cancelados, fecha_reporte = parsear_correo(msg)
             if fecha_reporte and fecha_reporte not in fechas_reporte:
                 fechas_reporte.append(fecha_reporte)
+            fecha_reporte_date = _parse_fecha_reporte_to_date(fecha_reporte)
+            for c in cancelados:
+                c["_fecha_reporte_date"] = fecha_reporte_date
             todas_canceladas.extend(cancelados)
 
         mail.logout()
@@ -229,11 +269,23 @@ def leer_canceladas_correo(dias=7):
         if not todas_canceladas:
             return [], fechas_reporte
 
+        # Por NID: quedarse con la fecha_reporte mas reciente entre todos los correos
+        ultima_fecha_reporte_por_nid = {}
+        for c in todas_canceladas:
+            frd = c.get("_fecha_reporte_date")
+            nid = c["nid"]
+            if frd and (nid not in ultima_fecha_reporte_por_nid or frd > ultima_fecha_reporte_por_nid[nid]):
+                ultima_fecha_reporte_por_nid[nid] = frd
+
         # Enriquecer con BigQuery
         nids_unicos = list(set(n["nid"] for n in todas_canceladas))
         nids_str = ",".join(f"'{nid}'" for nid in nids_unicos)
 
-        # 1. Solo mantener NIDs cuyo último registro en bubble sea Cancelado o No realizada
+        # 1. Determinar si bubble refleja la cancelación:
+        #    - Si último estado bubble es Cancelado/No realizada -> incluir
+        #    - Si bubble está desactualizado (modified_date anterior a fecha del reporte)
+        #      y estado NO es Finalizado -> confiar en el correo, incluir
+        #    - Si bubble tiene estado posterior (Finalizado u otro) -> excluir
         query_status = f"""
         WITH ultimo AS (
             SELECT nid, status, modified_date,
@@ -245,17 +297,37 @@ def leer_canceladas_correo(dias=7):
         """
         nids_realmente_cancelados = set()
         nids_modified = {}
+        nids_bubble_status = {}
+        nids_bubble_modified_date = {}
         try:
             for row in client.query(query_status).result():
-                # 'Cerrado' NO se considera cancelado: si el ultimo estado es
-                # Cerrado (tipicamente viene de Agendado), la visita esta
-                # consolidada para realizarse, no cancelada.
-                if row.status in ("Cancelado", "No realizada"):
-                    nids_realmente_cancelados.add(str(row.nid))
+                nid_s = str(row.nid)
+                nids_bubble_status[nid_s] = row.status
                 mod = str(row.modified_date) if row.modified_date else ""
+                mod_date_obj = None
                 if mod and "T" in mod:
+                    try:
+                        mod_date_obj = datetime.strptime(mod.split("T")[0], "%Y-%m-%d").date()
+                    except ValueError:
+                        mod_date_obj = None
                     mod = mod.split("T")[0]
-                nids_modified[str(row.nid)] = mod
+                nids_modified[nid_s] = mod
+                nids_bubble_modified_date[nid_s] = mod_date_obj
+
+                if row.status in ("Cancelado", "No realizada"):
+                    nids_realmente_cancelados.add(nid_s)
+                    continue
+                # Bubble desactualizado: confiar en el correo si el reporte es
+                # posterior a la última modificación de bubble y el estado no
+                # indica visita completada (Finalizado).
+                fecha_rep = ultima_fecha_reporte_por_nid.get(nid_s)
+                if (
+                    row.status != "Finalizado"
+                    and fecha_rep is not None
+                    and mod_date_obj is not None
+                    and fecha_rep > mod_date_obj
+                ):
+                    nids_realmente_cancelados.add(nid_s)
         except Exception as e:
             print(f"Error verificando status: {e}")
 
