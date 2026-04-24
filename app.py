@@ -264,6 +264,27 @@ def leer_canceladas_correo(dias=7):
         if not todas_canceladas:
             return [], fechas_reporte
 
+        # Filtrar: excluir NIDs que ya tienen fotos 360 (ya no hay que reagendar)
+        nids_pendientes_str = ",".join(f"'{n['nid']}'" for n in todas_canceladas)
+        query_360 = f"""
+        SELECT DISTINCT CAST(pc.nid AS STRING) AS nid
+        FROM `papyrus-data.habi_brokers_listing.property_card` pc
+        INNER JOIN `papyrus-data.habi_brokers_listing.property_image` pi
+          ON pc.id = pi.property_card_id
+        WHERE pi.source_image_id = 1
+          AND CAST(pc.nid AS STRING) IN ({nids_pendientes_str})
+        """
+        nids_con_360 = set()
+        try:
+            for row in client.query(query_360).result():
+                nids_con_360.add(str(row.nid))
+        except Exception as e:
+            print(f"Error verificando 360: {e}")
+
+        todas_canceladas = [n for n in todas_canceladas if n["nid"] not in nids_con_360]
+        if not todas_canceladas:
+            return [], fechas_reporte
+
         # Recalcular nids después de filtrar
         nids_unicos = list(set(n["nid"] for n in todas_canceladas))
         nids_str = ",".join(f"'{nid}'" for nid in nids_unicos)
