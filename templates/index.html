@@ -707,8 +707,7 @@
                     document.getElementById('empty-cancel').style.display = 'block';
                 } else {
                     document.getElementById('card-grid-cancel').style.display = 'grid';
-                    // Pasamos fechasReporte del backend para incluir dias con 0 canceladas.
-                    buildFilterOptions(canceladas, 'filter-dia-cancel', 'fecha_reporte', fechasReporte);
+                    buildFilterOptions(canceladas, 'filter-dia-cancel', 'fecha_reporte');
                     buildFilterOptions(canceladas, 'filter-equipo-cancel', 'equipo');
                     buildFilterOptions(canceladas, 'filter-comercial-cancel', 'c_comercial_captacion');
                     buildFilterOptions(canceladas, 'filter-ciudad-cancel', 'ciudad');
