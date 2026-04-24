@@ -909,6 +909,9 @@ def api_por_publicar_sin_fotos():
                OR gs.gravamen NOT IN ('Hipoteca + Patrimonio con hijos', 'Patrimonio hijos'))
         )
       )
+      -- Excluye los que firmaron el contrato de corretaje con patrimonio de familia:
+      -- esos los gestiona el equipo de levantamiento de Habi, no requieren accion del comercial.
+      AND COALESCE(cd.c_tipo_contrato_firmado, '') != 'Contrato de Corretaje con patrimonio de familia'
     ORDER BY cd.c_fecha_captacion DESC
     """
     try:
