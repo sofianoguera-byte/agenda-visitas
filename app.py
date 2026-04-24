@@ -405,6 +405,18 @@ def leer_canceladas_correo(dias=7):
         except Exception as e:
             print(f"Error enriqueciendo con BQ: {e}")
 
+        # Deduplicar por (nid, fecha_reporte): cuando llegan 2 correos con el
+        # mismo reporte, no mostrar la cancelacion repetida.
+        vistos = set()
+        dedupe = []
+        for n in todas_canceladas:
+            key = (n["nid"], n.get("fecha_reporte", ""))
+            if key in vistos:
+                continue
+            vistos.add(key)
+            dedupe.append(n)
+        todas_canceladas = dedupe
+
         # Armar resultado final
         resultado = []
         for n in todas_canceladas:
