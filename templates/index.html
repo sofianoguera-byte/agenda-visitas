@@ -1377,6 +1377,27 @@
             a.click();
             URL.revokeObjectURL(url);
         }
+
+        // Auto-refresh cada 5 min de todas las pestanas.
+        // Solo corre cuando la pestana del navegador esta visible (Page Visibility API)
+        // para no gastar IMAP ni BQ si el tab esta en background.
+        const AUTO_REFRESH_MS = 5 * 60 * 1000;
+        async function autoRefreshAll() {
+            if (document.hidden) return;
+            console.log('[auto-refresh] ' + new Date().toISOString());
+            try { await fetchVisitas(); } catch (e) {}
+            try { await fetchCanceladas(7); } catch (e) {}
+            try { await fetchPorPublicar(); } catch (e) {}
+            try { await fetchPorAgendar(); } catch (e) {}
+            try { await fetchFotosCorreo(); } catch (e) {}
+            try { await fetchSinFotos(); } catch (e) {}
+        }
+        setInterval(autoRefreshAll, AUTO_REFRESH_MS);
+        // Cuando la pestana vuelve a estar visible despues de estar oculta,
+        // refresca inmediatamente para mostrar datos al dia.
+        document.addEventListener('visibilitychange', () => {
+            if (!document.hidden) autoRefreshAll();
+        });
     </script>
 </body>
 </html>
