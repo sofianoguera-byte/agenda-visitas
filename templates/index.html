@@ -478,11 +478,21 @@
 
         // Parser de "15 de abril" -> {mes, dia} para ordenar cronologicamente.
         const _MESES_ES = {enero:1,febrero:2,marzo:3,abril:4,mayo:5,junio:6,julio:7,agosto:8,septiembre:9,octubre:10,noviembre:11,diciembre:12};
+        // Match por letras sin importar el orden, tolera typos como "abirl" por "abril".
+        const _MESES_SORTED = Object.fromEntries(
+            Object.entries(_MESES_ES).map(([m, n]) => [[...m].sort().join(''), n])
+        );
+        function _matchMes(mesStr) {
+            const s = mesStr.toLowerCase();
+            if (_MESES_ES[s] !== undefined) return _MESES_ES[s];
+            const key = [...s].sort().join('');
+            return _MESES_SORTED[key] || 0;
+        }
         function parseFechaReporte(s) {
             if (!s) return {mes: 0, dia: 0};
             const m = s.toLowerCase().match(/(\d+)\s+de\s+([a-zñ]+)/);
             if (!m) return {mes: 0, dia: 0};
-            return {mes: _MESES_ES[m[2]] || 0, dia: parseInt(m[1])};
+            return {mes: _matchMes(m[2]), dia: parseInt(m[1])};
         }
         function cmpFechaReporte(a, b) {
             const pa = parseFechaReporte(a), pb = parseFechaReporte(b);
