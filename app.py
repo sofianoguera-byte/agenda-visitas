@@ -26,9 +26,9 @@ if creds_json:
 
 client = bigquery.Client(project="papyrus-data")
 
-# Credenciales correo
-EMAIL_USER = "sofianoguera@habi.co"
-EMAIL_PASS = "nort eggi kzbc iotb"
+# Credenciales correo (desde env vars - NUNCA hardcodear)
+EMAIL_USER = os.environ.get("EMAIL_USER", "")
+EMAIL_PASS = os.environ.get("EMAIL_PASS", "")
 
 
 def get_fecha_manana():
