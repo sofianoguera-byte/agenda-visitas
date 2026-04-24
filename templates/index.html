@@ -476,12 +476,31 @@
             setTimeout(() => toast.classList.remove('show'), 4000);
         }
 
-        function buildFilterOptions(data, selId, key) {
-            const values = [...new Set(data.map(v => v[key]).filter(c => c))].sort();
+        // Parser de "15 de abril" -> {mes, dia} para ordenar cronologicamente.
+        const _MESES_ES = {enero:1,febrero:2,marzo:3,abril:4,mayo:5,junio:6,julio:7,agosto:8,septiembre:9,octubre:10,noviembre:11,diciembre:12};
+        function parseFechaReporte(s) {
+            if (!s) return {mes: 0, dia: 0};
+            const m = s.toLowerCase().match(/(\d+)\s+de\s+([a-zñ]+)/);
+            if (!m) return {mes: 0, dia: 0};
+            return {mes: _MESES_ES[m[2]] || 0, dia: parseInt(m[1])};
+        }
+        function cmpFechaReporte(a, b) {
+            const pa = parseFechaReporte(a), pb = parseFechaReporte(b);
+            if (pa.mes !== pb.mes) return pa.mes - pb.mes;
+            return pa.dia - pb.dia;
+        }
+
+        function buildFilterOptions(data, selId, key, extraValues) {
+            let values = new Set(data.map(v => v[key]).filter(c => c));
+            // extraValues permite agregar fechas de reporte que NO tienen canceladas
+            if (extraValues) extraValues.forEach(v => { if (v) values.add(v); });
+            let arr = [...values];
+            // Ordenar: fechas tipo "15 de abril" por fecha real, demas alfabeticamente.
+            if (key === 'fecha_reporte') arr.sort(cmpFechaReporte).reverse(); // mas reciente primero
+            else arr.sort();
             const sel = document.getElementById(selId);
-            // Clear old options except first
             while (sel.options.length > 1) sel.remove(1);
-            values.forEach(c => { const o = document.createElement('option'); o.value = c; o.textContent = c; sel.appendChild(o); });
+            arr.forEach(c => { const o = document.createElement('option'); o.value = c; o.textContent = c; sel.appendChild(o); });
         }
 
         // =====================
@@ -688,7 +707,8 @@
                     document.getElementById('empty-cancel').style.display = 'block';
                 } else {
                     document.getElementById('card-grid-cancel').style.display = 'grid';
-                    buildFilterOptions(canceladas, 'filter-dia-cancel', 'fecha_reporte');
+                    // Pasamos fechasReporte del backend para incluir dias con 0 canceladas.
+                    buildFilterOptions(canceladas, 'filter-dia-cancel', 'fecha_reporte', fechasReporte);
                     buildFilterOptions(canceladas, 'filter-equipo-cancel', 'equipo');
                     buildFilterOptions(canceladas, 'filter-comercial-cancel', 'c_comercial_captacion');
                     buildFilterOptions(canceladas, 'filter-ciudad-cancel', 'ciudad');
@@ -720,10 +740,13 @@
             const ef = document.getElementById('filter-equipo-cancel').value;
             const cf = document.getElementById('filter-comercial-cancel').value;
             const cif = document.getElementById('filter-ciudad-cancel').value;
-            return canceladas.filter(v => {
+            const filtered = canceladas.filter(v => {
                 const ms = !search || v.nid.toLowerCase().includes(search) || v.ciudad.toLowerCase().includes(search) || v.c_comercial_captacion.toLowerCase().includes(search);
                 return ms && (df === 'todos' || v.fecha_reporte === df) && (ef === 'todos' || v.equipo === ef) && (cf === 'todos' || v.c_comercial_captacion === cf) && (cif === 'todos' || v.ciudad === cif);
             });
+            // Orden cronologico descendente (mas reciente primero).
+            filtered.sort((a, b) => cmpFechaReporte(b.fecha_reporte, a.fecha_reporte));
+            return filtered;
         }
 
         function getWhatsAppReagendar(v) {
