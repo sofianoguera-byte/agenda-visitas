@@ -92,15 +92,26 @@ def notificar_visitas_manana():
             print(f"  ERROR enviando a {c['email']}: {e}")
 
 
-def notificar_canceladas_reagendar():
-    """Notifica cancelaciones. Lunes busca ultimos 3 dias, resto solo ayer. No envia sabados ni domingos."""
+def notificar_canceladas_reagendar(forzar=False):
+    """Notifica cancelaciones. Lunes busca ultimos 3 dias, resto solo ayer. No envia sabados ni domingos.
+
+    Args:
+        forzar: si True, envia incluso fin de semana (uso desde el boton manual de la web).
+
+    Returns:
+        dict con resumen: {enviados, errores, comerciales:[{email, nuevas, pendientes, ok, error}]}
+    """
     hoy = datetime.now()
     dia_semana = hoy.weekday()  # 0=lunes, 5=sabado, 6=domingo
 
-    # No enviar sabados ni domingos
-    if dia_semana in (5, 6):
+    resumen = {"enviados": 0, "errores": 0, "comerciales": [], "skipped": False, "motivo": ""}
+
+    # No enviar sabados ni domingos (a menos que se fuerce desde el boton)
+    if dia_semana in (5, 6) and not forzar:
         print(f"\n[{hoy}] Fin de semana, no se envian correos de canceladas.")
-        return
+        resumen["skipped"] = True
+        resumen["motivo"] = "fin_de_semana"
+        return resumen
 
     # Lunes: buscar ultimos 3 dias (viernes, sabado, domingo)
     # Resto: buscar solo ayer
@@ -149,7 +160,8 @@ def notificar_canceladas_reagendar():
 
     if not hay_nuevas_global:
         print("No hubo cancelaciones nuevas ayer. No se envian correos.")
-        return
+        resumen["motivo"] = "sin_canceladas_nuevas"
+        return resumen
 
     # Solo enviar a comerciales que tengan al menos 1 nueva
     comerciales = [c for c in mapa.values() if c["nuevas"]]
@@ -179,11 +191,26 @@ def notificar_canceladas_reagendar():
 
         asunto = f"Visita(s) cancelada(s) ayer - Reagendar ({len(c['nuevas'])} nueva(s))"
 
+        item = {
+            "email": c["email"],
+            "nombre": c["nombre"],
+            "nuevas": len(c["nuevas"]),
+            "pendientes": len(c["pendientes"]),
+            "ok": False,
+            "error": "",
+        }
         try:
             enviar_correo(c["email"], asunto, cuerpo)
             print(f"  Correo enviado a {c['email']} ({len(c['nuevas'])} nuevas, {len(c['pendientes'])} pendientes)")
+            item["ok"] = True
+            resumen["enviados"] += 1
         except Exception as e:
             print(f"  ERROR enviando a {c['email']}: {e}")
+            item["error"] = str(e)
+            resumen["errores"] += 1
+        resumen["comerciales"].append(item)
+
+    return resumen
 
 
 def resumen_maria_jose():

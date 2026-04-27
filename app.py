@@ -479,6 +479,21 @@ def api_canceladas():
     return jsonify({"canceladas": canceladas, "fechas_reporte": fechas_reporte})
 
 
+@app.route("/api/notificar/canceladas", methods=["POST"])
+def api_notificar_canceladas():
+    """Dispara on-demand el envio de correos de canceladas a comerciales.
+    Usa la misma logica que el cron (notificar.notificar_canceladas_reagendar)
+    pero forzando aunque sea fin de semana."""
+    try:
+        from notificar import notificar_canceladas_reagendar
+        resumen = notificar_canceladas_reagendar(forzar=True)
+        return jsonify({"ok": True, **resumen})
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
 SHEETS_CSV_URL = "https://docs.google.com/spreadsheets/d/1ZvSbRye1Mq-mv6iIW1IyaFbG97aJsXffBc0Gkd-mylk/export?format=csv"
 
 
