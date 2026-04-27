@@ -232,14 +232,20 @@ def resumen_maria_jose():
     except Exception as e:
         print(f"Error leyendo estados del Sheet: {e}")
 
-    # Obtener visitas de mañana
+    # Obtener visitas de mañana — primero dedup por NID, despues filtrar por
+    # fecha y status, para que no aparezcan registros viejos de visitas que se
+    # reagendaron a otro dia.
     query = f"""
-    WITH visitas_manana AS (
+    WITH ultimo_registro AS (
         SELECT *,
             ROW_NUMBER() OVER (PARTITION BY nid ORDER BY modified_date DESC) AS rn
         FROM `papyrus-master.bubble_gold.mart_bubble_schedule_co`
         WHERE nid != 'nan' AND nid IS NOT NULL
             AND visit_type = 'Habi Inmobiliaria'
+    ),
+    visitas_manana AS (
+        SELECT * FROM ultimo_registro
+        WHERE rn = 1
             AND status = 'Agendado'
             AND fecha_fin LIKE '{fecha}%'
     )
@@ -247,7 +253,6 @@ def resumen_maria_jose():
     FROM visitas_manana v
     LEFT JOIN `papyrus-data.habi_wh_inmobiliaria.consolidado_habi_inmobiliaria` c
         ON v.nid = CAST(c.nid AS STRING)
-    WHERE v.rn = 1
     """
     results = client.query(query).result()
 

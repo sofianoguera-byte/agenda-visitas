@@ -57,20 +57,25 @@ def utc_to_colombia(iso_str):
 
 def get_visitas_manana():
     tomorrow = get_fecha_manana()
+    # IMPORTANTE: primero deduplicar por NID quedando con el registro mas reciente,
+    # despues filtrar por fecha. Asi, si una visita se reagendo a otro dia, no se
+    # queda mostrando el registro viejo (bug detectado con NID 57874705512: estaba
+    # reagendado al miercoles pero seguia apareciendo en martes/mañana porque el
+    # filtro de fecha se aplicaba ANTES del dedup y descartaba el registro nuevo).
     query = f"""
-    WITH registros_manana AS (
+    WITH ultimo_registro AS (
         SELECT *,
             ROW_NUMBER() OVER (PARTITION BY nid ORDER BY modified_date DESC) AS rn
         FROM `papyrus-master.bubble_gold.mart_bubble_schedule_co`
         WHERE nid != 'nan'
             AND nid IS NOT NULL
             AND visit_type = 'Habi Inmobiliaria'
-            AND fecha_fin LIKE '{tomorrow}%'
     ),
     visitas_manana AS (
-        SELECT * FROM registros_manana
+        SELECT * FROM ultimo_registro
         WHERE rn = 1
             AND status IN ('Agendado', 'Cerrado')
+            AND fecha_fin LIKE '{tomorrow}%'
     )
     SELECT
         v.nid, v.fecha_fin, v.fecha_inicio, v.ciudad_muni, v.zona,
