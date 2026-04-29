@@ -2,6 +2,11 @@ __pycache__
 *.pyc
 ngrok*
 *.zip
-notificar.py
 notificar.bat
+notificar_5pm.bat
+notificar_12pm.bat
 notificar.log
+.claude
+explore_tables.ipynb
+queries_inventario
+APPS_SCRIPT_TRACKING_USUARIO.md

@@ -498,35 +498,12 @@ def api_notificar_canceladas():
     Usa la misma logica que el cron (notificar.notificar_canceladas_reagendar)
     pero forzando aunque sea fin de semana."""
     try:
-        # Fuerza que sys.path incluya el dir del proyecto (defensivo en gunicorn)
-        import sys, os as _os
-        proj_dir = _os.path.dirname(_os.path.abspath(__file__))
-        if proj_dir not in sys.path:
-            sys.path.insert(0, proj_dir)
-        # Debug: que archivos hay en el proj_dir
-        files_in_dir = sorted(_os.listdir(proj_dir))
-        notificar_file = _os.path.join(proj_dir, "notificar.py")
-        notificar_exists = _os.path.exists(notificar_file)
-
         from notificar import notificar_canceladas_reagendar
         resumen = notificar_canceladas_reagendar(forzar=True)
         return jsonify({"ok": True, **resumen})
     except Exception as e:
         import traceback
         traceback.print_exc()
-        # Devuelve toda la info de debug
-        try:
-            return jsonify({
-                "ok": False,
-                "error": str(e),
-                "error_type": type(e).__name__,
-                "proj_dir": proj_dir,
-                "notificar_exists": notificar_exists,
-                "sys_path_first3": sys.path[:3],
-                "files_in_dir": files_in_dir[:30],
-            }), 500
-        except Exception:
-            pass
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
