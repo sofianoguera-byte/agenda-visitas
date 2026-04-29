@@ -1122,14 +1122,18 @@ def obtener_estados():
 
 @app.route("/api/guardar-estado", methods=["POST"])
 def guardar_estado_compartido():
-    """Escribe un estado al Google Sheet via Apps Script."""
+    """Escribe un estado al Google Sheet via Apps Script.
+
+    Pasa también el campo `usuario` para registrar quién hizo el cambio.
+    """
     data = request.json
     nid = data.get("nid", "")
     fecha = data.get("fecha", get_fecha_manana())
     estado = data.get("estado", "")
+    usuario = (data.get("usuario") or "").strip()
     try:
         http_requests.post(ESTADOS_SCRIPT_URL, json={
-            "nid": nid, "fecha": fecha, "estado": estado
+            "nid": nid, "fecha": fecha, "estado": estado, "usuario": usuario
         }, timeout=10)
     except Exception as e:
         print(f"Error escribiendo al Sheet: {e}")

@@ -109,6 +109,13 @@
         <h1>Agenda de Visitas Habi</h1>
         <div class="header-right">
             <div class="fecha">{{ fecha_manana }}</div>
+            <div style="font-size:12px;color:rgba(255,255,255,0.8);">
+                Usuario: <span id="usuario-actual" style="font-weight:600;color:white;">—</span>
+                <a href="#" onclick="cambiarUsuario();return false;"
+                   style="color:rgba(255,255,255,0.9);margin-left:6px;text-decoration:underline;font-size:11px;">
+                   cambiar
+                </a>
+            </div>
             <button class="btn" style="background:rgba(255,255,255,0.2);color:white;font-size:14px;" onclick="abrirModalNotificar()">Notificar Comerciales</button>
         </div>
     </div>
@@ -433,11 +440,31 @@
             } catch (e) { console.error('Error cargando estados:', e); }
         }
 
+        // Identificación de usuario: se le pregunta una vez al cargar la página
+        // y se guarda en localStorage. Se manda con cada cambio de estado para
+        // tener trazabilidad de quién hace cada confirmación.
+        function getUsuario() {
+            let u = localStorage.getItem('usuario_visitas');
+            if (!u || !u.trim()) {
+                u = prompt('¿Cuál es tu nombre? (para registrar quién confirma cada visita)') || '';
+                u = u.trim();
+                if (u) localStorage.setItem('usuario_visitas', u);
+            }
+            return u || 'desconocido';
+        }
+
+        function cambiarUsuario() {
+            localStorage.removeItem('usuario_visitas');
+            const nuevo = getUsuario();
+            const span = document.getElementById('usuario-actual');
+            if (span) span.textContent = nuevo;
+        }
+
         function guardarEstadoCompartido(nid, estado) {
             fetch('/api/guardar-estado', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({nid, fecha: FECHA_MANANA, estado})
+                body: JSON.stringify({nid, fecha: FECHA_MANANA, estado, usuario: getUsuario()})
             });
         }
 
@@ -474,7 +501,13 @@
         }
 
         // --- Init ---
-        document.addEventListener('DOMContentLoaded', fetchVisitas);
+        document.addEventListener('DOMContentLoaded', () => {
+            // Pinta el nombre del usuario actual (lo guardado en localStorage)
+            const guardado = (localStorage.getItem('usuario_visitas') || '').trim();
+            const span = document.getElementById('usuario-actual');
+            if (span) span.textContent = guardado || 'no identificado';
+            fetchVisitas();
+        });
 
         document.getElementById('search').addEventListener('input', renderCards);
         document.getElementById('filter-status').addEventListener('change', renderCards);
@@ -634,7 +667,7 @@
                                 <a href="tel:+${phone}" class="btn btn-call">&#x1f4de; Llamar</a>
                                 <a href="https://wa.me/${phone}?text=${getWhatsAppMessage(v)}" target="_blank" class="btn btn-whatsapp" onclick="marcarWhatsApp('${v.nid}')">&#x1f4ac; WhatsApp</a>
                             ` : `<span class="btn btn-call" style="opacity:0.4;cursor:default;">&#x1f4de; Sin teléfono</span>`}
-                            <button class="btn btn-confirmar" onclick="toggleStatus('${v.nid}','confirmada')">&#x2705; Confirmar</button>
+                            <button class="btn btn-confirmar" onclick="toggleStatus('${v.nid}','confirmada')">&#x2705; Cliente confirmó</button>
                             <button class="btn btn-cancelar" onclick="abrirModalCancelar('${v.nid}')">&#x274c; Cancelar</button>
                         </div>
                     </div>`;
@@ -644,16 +677,23 @@
         }
 
         function toggleStatus(nid, newStatus) {
+            // Asegurarse de que tenemos identificado al usuario antes de marcar
+            const u = getUsuario();
+            if (!u || u === 'desconocido') {
+                showToast('Necesitamos tu nombre antes de poder confirmar visitas', 'error');
+                return;
+            }
             if (statusMap[nid] === newStatus) {
                 delete statusMap[nid];
                 guardarEstadoCompartido(nid, '');
                 renderCards();
-                showToast('NID ' + nid + ' vuelto a pendiente', 'info');
+                showToast('NID ' + nid + ' vuelto a pendiente (' + u + ')', 'info');
             } else {
                 statusMap[nid] = newStatus;
                 guardarEstadoCompartido(nid, newStatus);
                 renderCards();
-                showToast('NID ' + nid + ' marcado como ' + newStatus, 'success');
+                const label = newStatus === 'confirmada' ? 'cliente confirmó' : newStatus;
+                showToast('NID ' + nid + ' marcado como ' + label + ' por ' + u, 'success');
             }
         }
 
