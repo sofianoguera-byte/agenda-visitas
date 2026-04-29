@@ -502,10 +502,11 @@
 
         // --- Init ---
         document.addEventListener('DOMContentLoaded', () => {
-            // Pinta el nombre del usuario actual (lo guardado en localStorage)
-            const guardado = (localStorage.getItem('usuario_visitas') || '').trim();
+            // Pide el nombre apenas se carga la pagina (si no hay uno guardado).
+            // getUsuario() muestra prompt() solo si localStorage esta vacio.
+            const u = getUsuario();
             const span = document.getElementById('usuario-actual');
-            if (span) span.textContent = guardado || 'no identificado';
+            if (span) span.textContent = u || 'no identificado';
             fetchVisitas();
         });
 
