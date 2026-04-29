@@ -492,14 +492,111 @@ def api_canceladas():
     return jsonify({"canceladas": canceladas, "fechas_reporte": fechas_reporte})
 
 
+def _enviar_correo_smtp(destinatario, asunto, cuerpo):
+    """SMTP simple para los correos de notificacion (puerto 587 TLS)."""
+    import smtplib
+    from email.mime.text import MIMEText
+    from email.mime.multipart import MIMEMultipart
+    smtp_user = os.environ.get("SMTP_USER", "sofianoguera@habi.co")
+    smtp_pass = os.environ.get("SMTP_PASS", "nort eggi kzbc iotb")
+    msg = MIMEMultipart()
+    msg["From"] = smtp_user
+    msg["To"] = destinatario
+    msg["Subject"] = asunto
+    msg.attach(MIMEText(cuerpo, "plain"))
+    with smtplib.SMTP("smtp.gmail.com", 587) as server:
+        server.starttls()
+        server.login(smtp_user, smtp_pass)
+        server.send_message(msg)
+
+
+def _notificar_canceladas_reagendar(forzar=False):
+    """Inlined version del cron de notificar.py para que sea autocontenido en
+    el deploy. Misma logica: nuevas (ayer/lunes 3 dias) + pendientes del mes,
+    1 correo por comercial con cancelaciones nuevas."""
+    PAGE_URL = "https://agenda-visitas-wcdm.onrender.com"
+    hoy = datetime.now()
+    dia_semana = hoy.weekday()
+    resumen = {"enviados": 0, "errores": 0, "comerciales": [], "skipped": False, "motivo": ""}
+    if dia_semana in (5, 6) and not forzar:
+        resumen["skipped"] = True
+        resumen["motivo"] = "fin_de_semana"
+        return resumen
+    dias_atras = 3 if dia_semana == 0 else 1
+    fecha_desde_nuevas = (hoy - timedelta(days=dias_atras)).strftime("%Y-%m-%d")
+    primer_dia_mes = hoy.strftime("%Y-%m-01")
+    query = f"""
+    WITH ultimo_registro AS (
+        SELECT nid, status, fecha_inicio, modified_date, nombre_agendador, email_agendador,
+            ROW_NUMBER() OVER (PARTITION BY nid ORDER BY modified_date DESC) AS rn
+        FROM `papyrus-master.bubble_gold.mart_bubble_schedule_co`
+        WHERE nid != 'nan' AND nid IS NOT NULL AND visit_type = 'Habi Inmobiliaria'
+    ),
+    canceladas AS (
+        SELECT nid, fecha_inicio AS fecha_agendada, modified_date, nombre_agendador,
+               email_agendador, status
+        FROM ultimo_registro
+        WHERE rn = 1 AND status IN ('Cancelado', 'No realizada', 'Cerrado')
+    )
+    SELECT v.*, c.c_comercial_captacion,
+        CASE WHEN v.modified_date >= '{fecha_desde_nuevas}' THEN 'nueva' ELSE 'pendiente' END AS tipo
+    FROM canceladas v
+    LEFT JOIN `papyrus-data.habi_wh_inmobiliaria.consolidado_habi_inmobiliaria` c
+        ON v.nid = CAST(c.nid AS STRING)
+    WHERE v.modified_date >= '{primer_dia_mes}'
+    """
+    results = client.query(query).result()
+    mapa = {}
+    hay_nuevas = False
+    for row in results:
+        email = row.c_comercial_captacion or row.email_agendador or ""
+        if not email or email == "nan":
+            continue
+        if email not in mapa:
+            mapa[email] = {"email": email, "nombre": row.nombre_agendador or email,
+                           "nuevas": [], "pendientes": []}
+        fecha_ag = str(row.fecha_agendada).split("T")[0] if row.fecha_agendada else ""
+        entry = {"nid": str(row.nid), "fecha": fecha_ag}
+        if row.tipo == "nueva":
+            mapa[email]["nuevas"].append(entry); hay_nuevas = True
+        else:
+            mapa[email]["pendientes"].append(entry)
+    if not hay_nuevas:
+        resumen["motivo"] = "sin_canceladas_nuevas"
+        return resumen
+    comerciales = [c for c in mapa.values() if c["nuevas"]]
+    for c in comerciales:
+        nuevas_list = "\n".join(f"  - NID {n['nid']} (estaba agendado para {n['fecha']})" for n in c["nuevas"])
+        cuerpo = (
+            f"Hola {c['nombre']},\n\n"
+            f"Las siguientes visitas que tenias agendadas para ayer fueron canceladas, reagendalas:\n\n"
+            f"{nuevas_list}\n\n"
+        )
+        if c["pendientes"]:
+            pend = "\n".join(f"  - NID {n['nid']} (agendado para {n['fecha']})" for n in c["pendientes"])
+            cuerpo += f"Ademas, tienes estas canceladas de la semana pendientes por reagendar:\n\n{pend}\n\n"
+        cuerpo += f"Ingresa aqui para gestionarlas:\n{PAGE_URL}\n\nSaludos,\nEquipo Habi"
+        asunto = f"Visita(s) cancelada(s) ayer - Reagendar ({len(c['nuevas'])} nueva(s))"
+        item = {"email": c["email"], "nombre": c["nombre"],
+                "nuevas": len(c["nuevas"]), "pendientes": len(c["pendientes"]),
+                "ok": False, "error": ""}
+        try:
+            _enviar_correo_smtp(c["email"], asunto, cuerpo)
+            item["ok"] = True
+            resumen["enviados"] += 1
+        except Exception as e:
+            item["error"] = str(e)
+            resumen["errores"] += 1
+        resumen["comerciales"].append(item)
+    return resumen
+
+
 @app.route("/api/notificar/canceladas", methods=["POST"])
 def api_notificar_canceladas():
     """Dispara on-demand el envio de correos de canceladas a comerciales.
-    Usa la misma logica que el cron (notificar.notificar_canceladas_reagendar)
-    pero forzando aunque sea fin de semana."""
+    Usa la misma logica que el cron pero forzando aunque sea fin de semana."""
     try:
-        from notificar import notificar_canceladas_reagendar
-        resumen = notificar_canceladas_reagendar(forzar=True)
+        resumen = _notificar_canceladas_reagendar(forzar=True)
         return jsonify({"ok": True, **resumen})
     except Exception as e:
         import traceback
