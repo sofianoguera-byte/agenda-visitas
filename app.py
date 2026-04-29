@@ -1,3 +1,12 @@
+import sys
+import os
+
+# Asegurar que la carpeta del proyecto esté en sys.path para que
+# `from notificar import ...` funcione bajo gunicorn en Render.
+_HERE = os.path.dirname(os.path.abspath(__file__))
+if _HERE not in sys.path:
+    sys.path.insert(0, _HERE)
+
 from flask import Flask, render_template, jsonify, request
 from google.cloud import bigquery
 from google.oauth2 import credentials as oauth2_credentials
@@ -9,7 +18,6 @@ import re
 import csv
 import io
 import json
-import os
 import tempfile
 import requests as http_requests
 from bs4 import BeautifulSoup
@@ -479,7 +487,7 @@ def api_visitas():
 
 @app.route("/api/canceladas")
 def api_canceladas():
-    dias = request.args.get("dias", 7, type=int)
+    dias = request.args.get("dias", 30, type=int)  # default 30 dias hacia atras
     canceladas, fechas_reporte = leer_canceladas_correo(dias)
     return jsonify({"canceladas": canceladas, "fechas_reporte": fechas_reporte})
 

@@ -176,7 +176,7 @@
             <div class="search-bar">
                 <input type="text" id="search-cancel" placeholder="Buscar por NID, ciudad o comercial...">
                 <select id="filter-rango-cancel" onchange="cambiarRango()" style="display:none;">
-                    <option value="90" selected>Últimos 3 meses</option>
+                    <option value="30" selected>Últimos 30 días</option>
                 </select>
                 <select id="filter-dia-cancel"><option value="todos">Todos los días</option></select>
                 <select id="filter-equipo-cancel"><option value="todos">Todos los equipos</option></select>
@@ -746,21 +746,21 @@
             canceladas = [];
             document.getElementById('card-grid-cancel').style.display = 'none';
             document.getElementById('empty-cancel').style.display = 'none';
-            fetchCanceladas(90);
+            fetchCanceladas(30);
         }
 
-        let canceladas90 = null;  // Cache 90 dias
-        let canceladas365 = null; // Cache 365 dias
+        let canceladas30 = null;  // Cache 30 dias (vista por defecto)
+        let canceladas365 = null; // Cache 365 dias (cuando filtran por comercial)
 
         async function fetchCanceladas(dias) {
             try {
                 await cargarEstadosCompartidos();
-                if (!dias) dias = 90;
+                if (!dias) dias = 30;
 
                 // Usar cache si ya existe
                 let data;
-                if (dias === 90 && canceladas90) {
-                    data = canceladas90;
+                if (dias === 30 && canceladas30) {
+                    data = canceladas30;
                 } else if (dias === 365 && canceladas365) {
                     data = canceladas365;
                 } else {
@@ -768,7 +768,7 @@
                     document.getElementById('loading-cancel').innerHTML = '<div class="spinner"></div><p>Cargando canceladas...</p>';
                     const res = await fetch('/api/canceladas?dias=' + dias);
                     data = await res.json();
-                    if (dias === 90) canceladas90 = data;
+                    if (dias === 30) canceladas30 = data;
                     if (dias === 365) canceladas365 = data;
                 }
 
@@ -1540,7 +1540,7 @@
             if (document.hidden) return;
             console.log('[auto-refresh] ' + new Date().toISOString());
             try { await fetchVisitas(); } catch (e) {}
-            try { await fetchCanceladas(7); } catch (e) {}
+            try { await fetchCanceladas(30); } catch (e) {}
             try { await fetchPorPublicar(); } catch (e) {}
             try { await fetchPorAgendar(); } catch (e) {}
             try { await fetchFotosCorreo(); } catch (e) {}
