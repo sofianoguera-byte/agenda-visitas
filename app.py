@@ -712,14 +712,38 @@ SHEETS_CSV_URL = "https://docs.google.com/spreadsheets/d/1ZvSbRye1Mq-mv6iIW1IyaF
 
 
 def get_links_publicacion():
-    """Lee el Google Sheet y devuelve un dict nid -> link_publicacion."""
+    """Lee el Google Sheet y devuelve un dict nid -> link_publicacion.
+
+    Defensivo: prueba varias variantes del nombre de columna por si la tilde
+    de "Publicación" se rompe por encoding/BOM en algunos entornos.
+    """
     try:
         r = http_requests.get(SHEETS_CSV_URL, timeout=15)
-        reader = csv.DictReader(io.StringIO(r.text))
+        # Forzar utf-8 (Google a veces no setea encoding correctamente)
+        r.encoding = "utf-8"
+        text = r.text
+        # Quitar BOM si existe
+        if text.startswith("﻿"):
+            text = text[1:]
+        reader = csv.DictReader(io.StringIO(text))
+        # Detectar el nombre real de la columna de NID y de link en los headers
+        fieldnames = reader.fieldnames or []
+        def _find(*keys):
+            for k in keys:
+                for f in fieldnames:
+                    if (f or "").strip().lower() == k.lower():
+                        return f
+            return None
+        nid_col = _find("NID", "nid")
+        link_col = _find("Link Publicación", "Link Publicacion", "link_publicacion",
+                         "Link publicación", "link publicacion")
+        if not nid_col or not link_col:
+            print(f"[links] columnas no encontradas. headers={fieldnames}")
+            return {}
         links = {}
         for row in reader:
-            nid = str(row.get("NID", "")).strip()
-            link = (row.get("Link Publicación") or "").strip()
+            nid = str(row.get(nid_col, "")).strip()
+            link = (row.get(link_col) or "").strip()
             if nid and link:
                 links[nid] = link
         return links
