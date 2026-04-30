@@ -518,6 +518,8 @@ def api_juzgado():
           ) AS rn
         FROM `papyrus-delivery-data.operaciones_global.control_tower_saneamiento_co_bi` ct
         WHERE LOWER(ct.v_concepto_del_defensor_de_familia) = 'no favorable'
+          AND DATE(ct.v_fecha_concepto_del_defensor_de_familia)
+              >= DATE_SUB(CURRENT_DATE(), INTERVAL 6 MONTH)
       ) WHERE rn = 1
     )
     SELECT
