@@ -754,25 +754,43 @@ def get_links_publicacion():
 
 @app.route("/api/links")
 def api_links():
-    """Inmuebles del pipeline Inmo publicados con su link de publicacion del Sheet."""
+    """Inmuebles del pipeline Inmo PUBLICADOS ACTIVOS con su link del Sheet.
+
+    Reglas para 'publicado actualmente':
+      property_card.active = 1  AND  property_state.current_state_id = 2
+    (cruce de las dos tablas; pc.active solo es insuficiente).
+    """
     query = """
     WITH inmo AS (
       SELECT DISTINCT CAST(nid AS STRING) AS nid
       FROM `papyrus-master.squad_bi_global.hubspot_deal`
       WHERE pipeline = '803674753' AND nid IS NOT NULL
+    ),
+    publicados_activos AS (
+      -- NIDs actualmente publicados (ambas reglas obligatorias)
+      SELECT DISTINCT
+        CAST(pc.nid AS STRING) AS nid,
+        DATE(ps.date_publication) AS fecha_publicacion
+      FROM `papyrus-data.habi_brokers_listing.property_card` pc
+      JOIN `papyrus-data.habi_brokers_listing.property_state` ps
+        ON ps.property_card_id = pc.id
+      WHERE pc.active = 1
+        AND ps.current_state_id = 2
+        AND pc.nid IS NOT NULL
     )
     SELECT
-      CAST(cd.nid AS STRING) AS nid,
-      DATE(cd.date_publication) AS fecha_publicacion,
+      pa.nid,
+      pa.fecha_publicacion,
       COALESCE(h.hubspot_owner_id, cd.c_comercial_captacion) AS comercial,
       COALESCE(h.equipo_sellers, cd.c_equipo_seller) AS equipo,
       cd.ciudad
-    FROM `papyrus-data.habi_wh_inmobiliaria.consolidado_habi_inmobiliaria` cd
-    JOIN inmo ON inmo.nid = CAST(cd.nid AS STRING)
+    FROM publicados_activos pa
+    JOIN inmo ON inmo.nid = pa.nid
+    LEFT JOIN `papyrus-data.habi_wh_inmobiliaria.consolidado_habi_inmobiliaria` cd
+      ON CAST(cd.nid AS STRING) = pa.nid
     LEFT JOIN `papyrus-master.squad_bi_global.hubspot_deal` h
-      ON SAFE_CAST(cd.nid AS INT64) = h.nid AND h.pipeline = '803674753'
-    WHERE cd.date_publication IS NOT NULL
-    ORDER BY cd.date_publication DESC
+      ON SAFE_CAST(pa.nid AS INT64) = h.nid AND h.pipeline = '803674753'
+    ORDER BY pa.fecha_publicacion DESC
     """
     try:
         results = client.query(query).result()
