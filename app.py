@@ -12,6 +12,8 @@ from google.cloud import bigquery
 from google.oauth2 import credentials as oauth2_credentials
 from datetime import datetime, timedelta
 from urllib.parse import quote
+from functools import wraps
+import threading
 import imaplib
 import email as email_lib
 import re
@@ -23,6 +25,55 @@ import requests as http_requests
 from bs4 import BeautifulSoup
 
 app = Flask(__name__)
+
+# -----------------------------------------------------------------------------
+# Cache en memoria con TTL para reducir presión de RAM/CPU en Render free tier.
+# La instancia revento por OOM (>512MB) cuando varios endpoints corrian a la
+# vez. Cachear los resultados de BQ + Gmail baja el footprint en >50%.
+# -----------------------------------------------------------------------------
+_CACHE = {}
+_CACHE_LOCK = threading.Lock()
+
+
+def cached(ttl_seconds=300):
+    """Cachea la respuesta de un endpoint Flask por (nombre_funcion, query_args).
+    No usar en endpoints que mutan estado (POST de guardado, etc.)."""
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            try:
+                key_args = tuple(sorted(request.args.items())) if request else ()
+            except RuntimeError:
+                key_args = ()
+            key = (func.__name__, key_args)
+            now = datetime.now()
+            with _CACHE_LOCK:
+                entry = _CACHE.get(key)
+                if entry and (now - entry["ts"]).total_seconds() < ttl_seconds:
+                    return entry["response"]
+            response = func(*args, **kwargs)
+            with _CACHE_LOCK:
+                _CACHE[key] = {"ts": now, "response": response}
+                # housekeeping: si crece mucho, purga expirados
+                if len(_CACHE) > 60:
+                    expired = [
+                        k for k, v in _CACHE.items()
+                        if (now - v["ts"]).total_seconds() >= ttl_seconds * 2
+                    ]
+                    for k in expired:
+                        del _CACHE[k]
+            return response
+        return wrapper
+    return decorator
+
+
+def invalidate_cache(*func_names):
+    """Borra del cache todas las entradas de los endpoints listados.
+    Llamar desde POST mutadores para forzar refresh en el siguiente GET."""
+    with _CACHE_LOCK:
+        keys_to_drop = [k for k in _CACHE if k[0] in func_names]
+        for k in keys_to_drop:
+            del _CACHE[k]
 
 # En producción (Render), usa credenciales desde variable de entorno
 creds_json = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS_JSON")
@@ -463,6 +514,7 @@ def index():
 
 
 @app.route("/api/visitas")
+@cached(ttl_seconds=300)  # 5 min — visitas mañana cambian lento
 def api_visitas():
     visitas = get_visitas_manana()
     if request.args.get("test") == "1":
@@ -486,6 +538,7 @@ def api_visitas():
 
 
 @app.route("/api/canceladas")
+@cached(ttl_seconds=300)  # 5 min — IMAP de Gmail
 def api_canceladas():
     dias = request.args.get("dias", 30, type=int)  # default 30 dias hacia atras
     canceladas, fechas_reporte = leer_canceladas_correo(dias)
@@ -493,6 +546,7 @@ def api_canceladas():
 
 
 @app.route("/api/juzgado")
+@cached(ttl_seconds=900)  # 15 min — conceptos del defensor cambian a diario/semanal
 def api_juzgado():
     """Inmuebles del pipeline Inmo con concepto DESFAVORABLE del Defensor de Familia.
     Candidatos a la opcion de levantamiento via Juzgado.
@@ -761,6 +815,7 @@ def get_links_publicacion():
 
 
 @app.route("/api/links")
+@cached(ttl_seconds=300)  # 5 min — Sheet CSV
 def api_links():
     """Inmuebles del pipeline Inmo PUBLICADOS ACTIVOS con su link del Sheet.
 
@@ -828,6 +883,7 @@ def api_links():
 
 
 @app.route("/api/por-agendar")
+@cached(ttl_seconds=600)  # 10 min — captacion cambia en horas, no minutos
 def api_por_agendar():
     query = """
     WITH bubble_unica AS (
@@ -933,6 +989,7 @@ def api_por_agendar():
 
 
 @app.route("/api/por-publicar")
+@cached(ttl_seconds=600)  # 10 min
 def api_por_publicar():
     query = """
     WITH bubble_unica AS (
@@ -1121,6 +1178,7 @@ def leer_nids_fotos_cliente():
 
 
 @app.route("/api/por-publicar-fotos-correo")
+@cached(ttl_seconds=600)  # 10 min — IMAP "Fotos cliente"
 def api_por_publicar_fotos_correo():
     nids_correo = leer_nids_fotos_cliente()
     if not nids_correo:
@@ -1183,6 +1241,7 @@ def api_por_publicar_fotos_correo():
 
 
 @app.route("/api/por-publicar-sin-fotos")
+@cached(ttl_seconds=600)  # 10 min
 def api_por_publicar_sin_fotos():
     query = """
     WITH bubble_unica AS (
@@ -1306,6 +1365,7 @@ def cancelar_visita():
             server.starttls()
             server.login(EMAIL_USER, EMAIL_PASS)
             server.send_message(msg)
+        invalidate_cache("api_visitas", "api_canceladas", "api_por_agendar")
         return jsonify({"status": "ok"})
     except Exception as e:
         print(f"Error enviando correo cancelación: {e}")
@@ -1371,6 +1431,7 @@ def leer_sheet_estados():
 
 
 @app.route("/api/estados")
+@cached(ttl_seconds=60)  # 1 min — usuarios marcan cosas seguido
 def obtener_estados():
     """Devuelve todos los estados de mañana, separados por tipo."""
     fecha = get_fecha_manana()
@@ -1449,8 +1510,18 @@ def guardar_estado_compartido():
         }, timeout=10)
     except Exception as e:
         print(f"Error escribiendo al Sheet: {e}")
+    # invalidar cache de estados para que el siguiente GET vea el cambio
+    invalidate_cache("obtener_estados")
     return jsonify({"status": "ok"})
-    return jsonify(estados)
+
+
+@app.route("/api/flush-cache", methods=["POST"])
+def api_flush_cache():
+    """Borra todo el cache en memoria. Util para forzar refresh manualmente."""
+    with _CACHE_LOCK:
+        n = len(_CACHE)
+        _CACHE.clear()
+    return jsonify({"status": "ok", "entries_cleared": n})
 
 
 if __name__ == "__main__":
