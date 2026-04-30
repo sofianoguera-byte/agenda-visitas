@@ -709,56 +709,49 @@ def api_notificar_canceladas():
 
 
 SHEETS_ID_LINKS = "1ZvSbRye1Mq-mv6iIW1IyaFbG97aJsXffBc0Gkd-mylk"
-# Pestañas a leer del Sheet de links (cada una es un tab separado)
-SHEETS_TABS_LINKS = ["Bogota", "Ciudades"]
-
-
-def _read_csv_tab(sheet_id, tab_name):
-    """Lee una pestaña especifica de un Google Sheet via gviz endpoint."""
-    url = (f"https://docs.google.com/spreadsheets/d/{sheet_id}"
-           f"/gviz/tq?tqx=out:csv&sheet={http_requests.utils.quote(tab_name)}")
-    r = http_requests.get(url, timeout=15)
-    r.encoding = "utf-8"
-    text = r.text
-    if text.startswith("﻿"):
-        text = text[1:]
-    return list(csv.DictReader(io.StringIO(text)))
+# El sheet tiene multiples pestañas (Bogota + Ciudades), pero el endpoint
+# default `export?format=csv` ya trae todas las filas combinadas. Si en
+# algun momento se necesitan separadas, hay que averiguar el gid numerico
+# de cada pestaña y usar `&gid=N`.
+SHEETS_CSV_URL = f"https://docs.google.com/spreadsheets/d/{SHEETS_ID_LINKS}/export?format=csv"
 
 
 def get_links_publicacion():
-    """Lee el Google Sheet (Bogota + Ciudades) y devuelve dict nid -> link.
+    """Lee el Google Sheet de links y devuelve dict nid -> link.
 
-    Defensivo: detecta nombre real de las columnas porque la tilde de
-    'Publicación' se puede romper por encoding/BOM en algunos entornos.
+    Defensivo: prueba varias variantes del nombre de columna por si la tilde
+    de 'Publicación' se rompe por encoding/BOM en algunos entornos.
     """
-    links = {}
-    for tab in SHEETS_TABS_LINKS:
-        try:
-            rows = _read_csv_tab(SHEETS_ID_LINKS, tab)
-            if not rows:
-                continue
-            fieldnames = list(rows[0].keys())
-            def _find(*keys):
-                for k in keys:
-                    for f in fieldnames:
-                        if (f or "").strip().lower() == k.lower():
-                            return f
-                return None
-            nid_col = _find("NID", "nid")
-            link_col = _find("Link Publicación", "Link Publicacion", "link_publicacion",
-                             "Link publicación", "link publicacion")
-            if not nid_col or not link_col:
-                print(f"[links] columnas no encontradas en tab '{tab}'. headers={fieldnames}")
-                continue
-            for row in rows:
-                nid = str(row.get(nid_col, "")).strip()
-                link = (row.get(link_col) or "").strip()
-                if nid and link:
-                    # si el mismo NID aparece en ambas pestañas, deja el ultimo (no critico)
-                    links[nid] = link
-        except Exception as e:
-            print(f"[links] error leyendo tab '{tab}': {e}")
-    return links
+    try:
+        r = http_requests.get(SHEETS_CSV_URL, timeout=20)
+        r.encoding = "utf-8"
+        text = r.text
+        if text.startswith("﻿"):
+            text = text[1:]
+        reader = csv.DictReader(io.StringIO(text))
+        fieldnames = reader.fieldnames or []
+        def _find(*keys):
+            for k in keys:
+                for f in fieldnames:
+                    if (f or "").strip().lower() == k.lower():
+                        return f
+            return None
+        nid_col = _find("NID", "nid")
+        link_col = _find("Link Publicación", "Link Publicacion", "link_publicacion",
+                         "Link publicación", "link publicacion")
+        if not nid_col or not link_col:
+            print(f"[links] columnas no encontradas. headers={fieldnames}")
+            return {}
+        links = {}
+        for row in reader:
+            nid = str(row.get(nid_col, "")).strip()
+            link = (row.get(link_col) or "").strip()
+            if nid and link:
+                links[nid] = link
+        return links
+    except Exception as e:
+        print(f"Error leyendo Google Sheet: {e}")
+        return {}
 
 
 @app.route("/api/links")
