@@ -509,13 +509,15 @@ def api_juzgado():
       WHERE rn = 1 AND fecha_desistio_inmobiliaria IS NULL
         AND dealstage NOT IN ('1182117639','closedwon','closedlost')
     ),
+    -- control_tower trae el concepto del defensor + nombres y telefono en plano
     desfavorables AS (
-      -- Si un NID tiene varios registros, tomar el mas reciente.
       SELECT * FROM (
         SELECT
           CAST(ct.nid AS STRING) AS nid,
           DATE(ct.v_fecha_concepto_del_defensor_de_familia) AS fecha_desfavorable,
           ct.v_concepto_del_defensor_de_familia AS concepto,
+          ct.v_nombre_cliente_1 AS nombre_cliente_plano,
+          ct.v_numero_telefonico_cliente_1 AS telefono_plano,
           ROW_NUMBER() OVER (
             PARTITION BY ct.nid
             ORDER BY ct.v_fecha_concepto_del_defensor_de_familia DESC
@@ -531,8 +533,9 @@ def api_juzgado():
       COALESCE(h.hubspot_owner_id, cd.c_comercial_captacion) AS comercial,
       COALESCE(h.equipo_sellers, cd.c_equipo_seller) AS equipo,
       cd.ciudad,
-      cd.tel_fono_del_cliente_1 AS telefono_cliente,
-      cd.nombre_completo_del_cliente_1 AS nombre_cliente
+      -- preferir telefono plano de control_tower; fallback al de consolidado
+      COALESCE(d.telefono_plano, cd.tel_fono_del_cliente_1) AS telefono_cliente,
+      d.nombre_cliente_plano AS nombre_cliente
     FROM desfavorables d
     JOIN inmo_activo ia ON ia.nid = d.nid
     LEFT JOIN `papyrus-data.habi_wh_inmobiliaria.consolidado_habi_inmobiliaria` cd

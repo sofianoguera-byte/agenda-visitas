@@ -1179,17 +1179,13 @@
             grid.innerHTML = filtered.map(j => {
                 const st = getJuzgadoState(j.nid);
                 const phone = formatPhone(j.telefono_cliente);
-                const primerNombre = (j.nombre_cliente || '').split(' ')[0] || '';
                 const wppMsg = encodeURIComponent(
-                    `Hola ${primerNombre} 👋\n\n` +
-                    `Te escribimos de Habi con una noticia que te va a interesar.\n\n` +
-                    `Sabemos que no fue posible vender tu inmueble porque el Defensor de Familia no autorizo ` +
-                    `el levantamiento del patrimonio de familia. ¡Pero tenemos una nueva opcion! ` +
-                    `Ahora podemos hacerlo por la via del juzgado — es una alternativa segura, totalmente legal, ` +
-                    `y ya esta funcionando con otros propietarios que estaban en tu misma situacion.\n\n` +
-                    `Lo mejor: nosotros te acompañamos en todo el proceso, no estas solo. 🏡\n\n` +
-                    `¿Te gustaria que uno de nuestros expertos te llame para contarte como funciona y si aplica ` +
-                    `para tu caso? Sin compromiso, solo para que conozcas las opciones que tienes. 📞`
+                    `Hola,\n\n` +
+                    `Te escribimos de Habi. Sabemos que no pudimos vender tu inmueble porque ` +
+                    `no fue posible levantar el patrimonio de familia.\n\n` +
+                    `Tenemos una nueva forma de hacerlo: a traves del juzgado. ` +
+                    `Es un proceso legal y seguro, y nosotros nos encargamos de todo.\n\n` +
+                    `¿Te llamamos para contarte como funciona?`
                 );
                 const stClass = st === 'interesado' ? 'confirmada' :
                                 st === 'no_interesado' ? 'cancelada-card' : '';
