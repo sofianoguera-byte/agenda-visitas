@@ -1036,16 +1036,20 @@
                         ${filas}
                     `;
                 }
-                // Show close button
+                // Mostrar resultado y dejar el boton habilitado para reintentar
                 document.getElementById('notif-canc-actions').style.display = 'flex';
-                document.getElementById('btn-confirmar-notif-canc').style.display = 'none';
+                document.getElementById('btn-confirmar-notif-canc').style.display = 'inline-flex';
+                document.getElementById('btn-confirmar-notif-canc').disabled = false;
+                document.getElementById('btn-confirmar-notif-canc').textContent = 'Enviar de nuevo';
             } catch (err) {
                 document.getElementById('notif-canc-loading').style.display = 'none';
                 const resDiv = document.getElementById('notif-canc-resultado');
                 resDiv.style.display = 'block';
                 resDiv.innerHTML = `<div style="color:#b91c1c;"><strong>Error de red:</strong> ${err.message}</div>`;
                 document.getElementById('notif-canc-actions').style.display = 'flex';
-                document.getElementById('btn-confirmar-notif-canc').style.display = 'none';
+                document.getElementById('btn-confirmar-notif-canc').style.display = 'inline-flex';
+                document.getElementById('btn-confirmar-notif-canc').disabled = false;
+                document.getElementById('btn-confirmar-notif-canc').textContent = 'Reintentar';
             }
         }
         // ==========================
