@@ -753,7 +753,8 @@ def get_links_publicacion():
             for row in rows:
                 nid = str(row.get(nid_col, "")).strip()
                 link = (row.get(link_col) or "").strip()
-                if nid and link:
+                # solo aceptar URLs reales — "NO APLICA", "Pendiente", "N/A" etc se filtran
+                if nid and link.lower().startswith("http"):
                     links[nid] = link
         except Exception as e:
             print(f"[links] error leyendo gid={gid}: {e}")
