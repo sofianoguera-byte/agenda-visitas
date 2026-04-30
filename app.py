@@ -492,6 +492,82 @@ def api_canceladas():
     return jsonify({"canceladas": canceladas, "fechas_reporte": fechas_reporte})
 
 
+@app.route("/api/juzgado")
+def api_juzgado():
+    """Inmuebles del pipeline Inmo con concepto DESFAVORABLE del Defensor de Familia.
+    Candidatos a la opcion de levantamiento via Juzgado.
+    """
+    query = """
+    WITH ult_etapa AS (
+      SELECT CAST(nid AS STRING) AS nid, dealstage, fecha_desistio_inmobiliaria,
+        ROW_NUMBER() OVER (PARTITION BY nid ORDER BY hs_lastmodifieddate DESC) AS rn
+      FROM `papyrus-master.squad_bi_global.hubspot_deal`
+      WHERE pipeline = '803674753' AND nid IS NOT NULL
+    ),
+    inmo_activo AS (
+      SELECT DISTINCT nid FROM ult_etapa
+      WHERE rn = 1 AND fecha_desistio_inmobiliaria IS NULL
+        AND dealstage NOT IN ('1182117639','closedwon','closedlost')
+    ),
+    desfavorables AS (
+      -- Si un NID tiene varios registros, tomar el mas reciente.
+      SELECT * FROM (
+        SELECT
+          CAST(ct.nid AS STRING) AS nid,
+          DATE(ct.v_fecha_concepto_del_defensor_de_familia) AS fecha_desfavorable,
+          ct.v_concepto_del_defensor_de_familia AS concepto,
+          ROW_NUMBER() OVER (
+            PARTITION BY ct.nid
+            ORDER BY ct.v_fecha_concepto_del_defensor_de_familia DESC
+          ) AS rn
+        FROM `papyrus-delivery-data.operaciones_global.control_tower_saneamiento_co_bi` ct
+        WHERE LOWER(ct.v_concepto_del_defensor_de_familia) = 'no favorable'
+      ) WHERE rn = 1
+    )
+    SELECT
+      cd.nid,
+      d.fecha_desfavorable,
+      DATE(cd.c_fecha_captacion) AS fecha_captacion,
+      COALESCE(h.hubspot_owner_id, cd.c_comercial_captacion) AS comercial,
+      COALESCE(h.equipo_sellers, cd.c_equipo_seller) AS equipo,
+      cd.ciudad,
+      cd.tel_fono_del_cliente_1 AS telefono_cliente,
+      cd.nombre_completo_del_cliente_1 AS nombre_cliente
+    FROM desfavorables d
+    JOIN inmo_activo ia ON ia.nid = d.nid
+    LEFT JOIN `papyrus-data.habi_wh_inmobiliaria.consolidado_habi_inmobiliaria` cd
+      ON CAST(cd.nid AS STRING) = d.nid
+    LEFT JOIN `papyrus-master.squad_bi_global.hubspot_deal` h
+      ON SAFE_CAST(d.nid AS INT64) = h.nid AND h.pipeline = '803674753'
+    WHERE cd.v_fecha_venta IS NULL
+      AND cd.fecha_desistio_inmobiliaria IS NULL
+    ORDER BY d.fecha_desfavorable DESC
+    """
+    try:
+        results = client.query(query).result()
+        out = []
+        seen = set()
+        for row in results:
+            nid = str(row.nid) if row.nid else ""
+            if not nid or nid in seen:
+                continue
+            seen.add(nid)
+            out.append({
+                "nid": nid,
+                "fecha_desfavorable": str(row.fecha_desfavorable) if row.fecha_desfavorable else "",
+                "fecha_captacion": str(row.fecha_captacion) if row.fecha_captacion else "",
+                "comercial": clean(row.comercial),
+                "equipo": clean(row.equipo),
+                "ciudad": (row.ciudad or "").title() if row.ciudad else "",
+                "telefono_cliente": clean(row.telefono_cliente),
+                "nombre_cliente": clean(row.nombre_cliente),
+            })
+        return jsonify(out)
+    except Exception as e:
+        print(f"Error consultando juzgado: {e}")
+        return jsonify([])
+
+
 def _send_email(destinatario, asunto, cuerpo, _from_name="Habi Inmobiliaria"):
     """Envia un correo. Usa SendGrid HTTPS si esta configurado (Render bloquea SMTP),
     cae a SMTP si no hay API key (entorno local)."""
@@ -1205,6 +1281,7 @@ def obtener_estados():
     sf_comentario = {}
     fc_estado = {}
     fc_comentario = {}
+    juzgado_estado = {}  # contactado / interesado / no_interesado
 
     for row in leer_sheet_estados():
         nid = row["nid"]
@@ -1219,10 +1296,10 @@ def obtener_estados():
                 whatsapp[nid] = True
             elif estado.startswith("cc:"):
                 cancel_contacto[nid] = estado[3:]
-            elif not estado.startswith(("ps:", "pc:", "sf:", "sc:")):
+            elif not estado.startswith(("ps:", "pc:", "sf:", "sc:", "jz:", "fc:", "fd:")):
                 visita_estados[nid] = estado
 
-        # Estados permanentes (publicar, sin fotos)
+        # Estados permanentes (publicar, sin fotos, juzgado)
         if f == "perm":
             if estado.startswith("ps:") and estado[3:]:
                 pub_estado[nid] = estado[3:]
@@ -1236,6 +1313,8 @@ def obtener_estados():
                 fc_estado[nid] = estado[3:]
             elif estado.startswith("fd:"):
                 fc_comentario[nid] = estado[3:]
+            elif estado.startswith("jz:") and estado[3:]:
+                juzgado_estado[nid] = estado[3:]
 
     return jsonify({
         "visita": visita_estados,
@@ -1247,6 +1326,7 @@ def obtener_estados():
         "sfComentario": sf_comentario,
         "fcEstado": fc_estado,
         "fcComentario": fc_comentario,
+        "juzgado": juzgado_estado,
     })
 
 

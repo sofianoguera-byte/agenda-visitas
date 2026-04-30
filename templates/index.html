@@ -125,6 +125,7 @@
         <div class="tab" data-tab="agendar" onclick="switchTab('agendar')">Por Agendar</div>
         <div class="tab active" data-tab="visitas" onclick="switchTab('visitas')">Visitas de Mañana</div>
         <div class="tab" data-tab="canceladas" onclick="switchTab('canceladas')">Canceladas por Reagendar</div>
+        <div class="tab" data-tab="juzgado" onclick="switchTab('juzgado')">Juzgado</div>
         <div class="tab" data-tab="publicar" onclick="switchTab('publicar')">Por Publicar</div>
         <div class="tab" data-tab="sinfotos" onclick="switchTab('sinfotos')">Por Publicar Sin Fotos</div>
         <div class="tab" data-tab="fotoscorreo" onclick="switchTab('fotoscorreo')">Por Publicar Fotos Correo</div>
@@ -186,6 +187,41 @@
             <div id="loading-cancel" class="loading"><div class="spinner"></div><p>Cargando visitas canceladas...</p></div>
             <div id="card-grid-cancel" class="card-grid" style="display:none;"></div>
             <div id="empty-cancel" class="empty-state" style="display:none;"><h2>No hay visitas canceladas</h2><p>No se encontraron cancelaciones recientes.</p></div>
+        </div>
+    </div>
+
+    <!-- TAB 2.5: Juzgado (concepto desfavorable Defensor) -->
+    <div class="tab-content" id="tab-juzgado">
+        <div class="stats-bar">
+            <div class="stat-card"><div class="icon canceladas">⚖️</div><div class="info"><h3 id="stat-jz-total">-</h3><p>Total candidatos</p></div></div>
+            <div class="stat-card"><div class="icon confirmadas">✅</div><div class="info"><h3 id="stat-jz-interesados">0</h3><p>Interesados</p></div></div>
+            <div class="stat-card"><div class="icon pendientes">📞</div><div class="info"><h3 id="stat-jz-contactados">0</h3><p>Contactados</p></div></div>
+            <div class="stat-card"><div class="icon total">⏳</div><div class="info"><h3 id="stat-jz-pendientes">0</h3><p>Sin gestionar</p></div></div>
+        </div>
+        <div class="container">
+            <div style="display:flex;justify-content:flex-end;margin-bottom:12px;gap:8px;">
+                <button id="btn-notificar-juzgado" class="btn"
+                        style="background:#6c3baa;color:white;font-size:13px;padding:10px 16px;"
+                        onclick="notificarJuzgadoMailto()">
+                    📨 Notificar comerciales con candidatos
+                </button>
+            </div>
+            <div class="search-bar">
+                <input type="text" id="search-jz" placeholder="Buscar por NID, ciudad, comercial o cliente...">
+                <select id="filter-equipo-jz"><option value="todos">Todos los equipos</option></select>
+                <select id="filter-comercial-jz"><option value="todos">Todos los comerciales</option></select>
+                <select id="filter-mes-jz"><option value="todos">Todos los meses</option></select>
+                <select id="filter-estado-jz">
+                    <option value="todos">Todos los estados</option>
+                    <option value="pendiente">Sin gestionar</option>
+                    <option value="contactado">Contactados</option>
+                    <option value="interesado">Interesados</option>
+                    <option value="no_interesado">No interesados</option>
+                </select>
+            </div>
+            <div id="loading-jz" class="loading"><div class="spinner"></div><p>Cargando candidatos...</p></div>
+            <div id="card-grid-jz" class="card-grid" style="display:none;"></div>
+            <div id="empty-jz" class="empty-state" style="display:none;"><h2>No hay candidatos para juzgado</h2><p>No se encontraron negocios con concepto desfavorable activos.</p></div>
         </div>
     </div>
 
@@ -437,6 +473,9 @@
                 sfCommentMap = data.sfComentario || {};
                 fcStatusMap = data.fcEstado || {};
                 fcCommentMap = data.fcComentario || {};
+                if (typeof juzgadoStateMap !== 'undefined') {
+                    juzgadoStateMap = data.juzgado || {};
+                }
             } catch (e) { console.error('Error cargando estados:', e); }
         }
 
@@ -472,7 +511,7 @@
             fetch('/api/guardar-estado', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({nid, fecha: 'perm', estado})
+                body: JSON.stringify({nid, fecha: 'perm', estado, usuario: getUsuario()})
             });
         }
 
@@ -494,6 +533,7 @@
             document.querySelector(`.tab[data-tab="${tab}"]`).classList.add('active');
             document.getElementById('tab-' + tab).classList.add('active');
             if (tab === 'canceladas' && !canceladasLoaded) fetchCanceladas();
+            if (tab === 'juzgado' && !juzgadoLoaded) fetchJuzgado();
             if (tab === 'publicar' && !publicarLoaded) fetchPorPublicar();
             if (tab === 'agendar' && !agendarLoaded) fetchPorAgendar();
             if (tab === 'sinfotos' && !sinFotosLoaded) fetchSinFotos();
@@ -1033,6 +1073,225 @@
             window.location.href = url;
             showToast(`Abriendo Gmail con ${emails.length} comercial(es) en BCC`, 'success');
         }
+
+        // ==========================
+        // TAB JUZGADO (concepto desfavorable Defensor)
+        // ==========================
+        let juzgado = [];
+        let juzgadoLoaded = false;
+        // Estados de juzgado: contactado / interesado / no_interesado
+        // Persistidos en el Sheet con prefijo 'jz:' (igual mecanismo que cc: para canceladas)
+        let juzgadoStateMap = {};
+
+        document.getElementById('search-jz').addEventListener('input', renderJuzgado);
+        document.getElementById('filter-equipo-jz').addEventListener('change', renderJuzgado);
+        document.getElementById('filter-comercial-jz').addEventListener('change', renderJuzgado);
+        document.getElementById('filter-mes-jz').addEventListener('change', renderJuzgado);
+        document.getElementById('filter-estado-jz').addEventListener('change', renderJuzgado);
+
+        async function fetchJuzgado() {
+            try {
+                await cargarEstadosCompartidos();
+                document.getElementById('loading-jz').style.display = 'block';
+                const res = await fetch('/api/juzgado');
+                juzgado = await res.json();
+                juzgadoLoaded = true;
+                document.getElementById('loading-jz').style.display = 'none';
+                if (!Array.isArray(juzgado) || juzgado.length === 0) {
+                    document.getElementById('empty-jz').style.display = 'block';
+                    return;
+                }
+                document.getElementById('card-grid-jz').style.display = 'grid';
+                buildFilterOptions(juzgado, 'filter-equipo-jz', 'equipo');
+                buildFilterOptions(juzgado, 'filter-comercial-jz', 'comercial');
+                buildMesOptions(juzgado, 'filter-mes-jz', 'fecha_desfavorable');
+                renderJuzgado();
+            } catch (e) {
+                console.error('Error juzgado:', e);
+                document.getElementById('loading-jz').innerHTML = '<p style="color:#ef4444;">Error cargando candidatos.</p>';
+            }
+        }
+
+        function getJuzgadoState(nid) {
+            // Estado guardado en juzgadoStateMap; tambien lee del cancelContactMap si fue migrado
+            return juzgadoStateMap[nid] || '';
+        }
+
+        function buildMesOptions(arr, selectId, fechaField) {
+            const sel = document.getElementById(selectId);
+            const meses = new Set();
+            arr.forEach(it => {
+                const f = it[fechaField] || '';
+                if (f.length >= 7) meses.add(f.substring(0, 7));  // YYYY-MM
+            });
+            const current = sel.value;
+            sel.innerHTML = '<option value="todos">Todos los meses</option>' +
+                Array.from(meses).sort().reverse().map(m =>
+                    `<option value="${m}" ${m === current ? 'selected' : ''}>${m}</option>`
+                ).join('');
+        }
+
+        function getFilteredJuzgado() {
+            const search = (document.getElementById('search-jz').value || '').toLowerCase().trim();
+            const eq = document.getElementById('filter-equipo-jz').value;
+            const co = document.getElementById('filter-comercial-jz').value;
+            const mes = document.getElementById('filter-mes-jz').value;
+            const est = document.getElementById('filter-estado-jz').value;
+            return (juzgado || []).filter(j => {
+                if (eq !== 'todos' && j.equipo !== eq) return false;
+                if (co !== 'todos' && j.comercial !== co) return false;
+                if (mes !== 'todos' && (j.fecha_desfavorable || '').substring(0, 7) !== mes) return false;
+                const st = getJuzgadoState(j.nid) || 'pendiente';
+                if (est !== 'todos' && st !== est) return false;
+                if (search) {
+                    const blob = `${j.nid} ${j.ciudad} ${j.comercial} ${j.nombre_cliente}`.toLowerCase();
+                    if (!blob.includes(search)) return false;
+                }
+                return true;
+            });
+        }
+
+        function renderJuzgado() {
+            const filtered = getFilteredJuzgado();
+            const grid = document.getElementById('card-grid-jz');
+
+            // Stats
+            const total = juzgado.length;
+            let interesados = 0, contactados = 0, pendientes = 0, noInter = 0;
+            juzgado.forEach(j => {
+                const s = getJuzgadoState(j.nid);
+                if (s === 'interesado') interesados++;
+                else if (s === 'no_interesado') noInter++;
+                else if (s === 'contactado') contactados++;
+                else pendientes++;
+            });
+            document.getElementById('stat-jz-total').textContent = total;
+            document.getElementById('stat-jz-interesados').textContent = interesados;
+            document.getElementById('stat-jz-contactados').textContent = contactados;
+            document.getElementById('stat-jz-pendientes').textContent = pendientes;
+
+            if (filtered.length === 0) {
+                grid.innerHTML = '<div class="empty-state"><h2>Sin resultados</h2></div>';
+                grid.style.display = 'block';
+                return;
+            }
+            grid.style.display = 'grid';
+            grid.innerHTML = filtered.map(j => {
+                const st = getJuzgadoState(j.nid);
+                const phone = formatPhone(j.telefono_cliente);
+                const wppMsg = encodeURIComponent(
+                    `Hola ${j.nombre_cliente || ''}, te escribimos de Habi. ` +
+                    `Sabemos que no fue posible vender tu inmueble porque no se logro levantar el patrimonio ` +
+                    `de familia por medio del Defensor. Ahora en Habi tenemos una nueva opcion: ` +
+                    `levantarlo a traves del Juzgado. ¿Te interesaria que te contactemos para explicarte mas a fondo?`
+                );
+                const stClass = st === 'interesado' ? 'confirmada' :
+                                st === 'no_interesado' ? 'cancelada-card' : '';
+                const stBadge = st ?
+                    `<span class="status-badge" style="position:static;background:${st === 'interesado' ? '#d1fae5;color:#065f46' : st === 'no_interesado' ? '#fee2e2;color:#991b1b' : '#fef3c7;color:#92400e'};">${st}</span>` : '';
+                const contactBadge = (st === 'contactado' || st === 'interesado' || st === 'no_interesado') ?
+                    '<span style="background:#d1fae5;color:#065f46;padding:4px 10px;border-radius:20px;font-size:11px;font-weight:700;">Contactado</span>' : '';
+                return `
+                <div class="visita-card ${stClass}" id="card-jz-${j.nid}">
+                    <div style="position:absolute;top:16px;right:16px;display:flex;gap:6px;">
+                        ${contactBadge}
+                        ${stBadge}
+                    </div>
+                    <div class="card-header">
+                        <span class="nid-badge">NID ${j.nid}</span>
+                        <span class="hora-badge" style="background:#fee2e2;color:#991b1b;">Desfavorable ${j.fecha_desfavorable || ''}</span>
+                    </div>
+                    <div class="card-body">
+                        <div class="field"><label>Cliente</label><span>${j.nombre_cliente || 'N/A'}</span></div>
+                        <div class="field"><label>Comercial</label><span>${j.comercial || 'N/A'}</span></div>
+                        <div class="field"><label>Equipo</label><span>${j.equipo || 'N/A'}</span></div>
+                        <div class="field"><label>Ciudad</label><span>${j.ciudad || 'N/A'}</span></div>
+                        <div class="field"><label>Captado</label><span>${j.fecha_captacion || 'N/A'}</span></div>
+                        <div class="field"><label>Teléfono</label><span>${j.telefono_cliente || 'Sin teléfono'}</span></div>
+                    </div>
+                    <div class="card-actions">
+                        ${phone ? `
+                            <a href="tel:+${phone}" class="btn btn-call" onclick="marcarContactadoJuzgado('${j.nid}')">📞 Llamar</a>
+                            <a href="https://wa.me/${phone}?text=${wppMsg}" target="_blank" class="btn btn-whatsapp" onclick="marcarContactadoJuzgado('${j.nid}')">💬 WhatsApp</a>
+                        ` : `<span class="btn btn-call" style="opacity:0.4;cursor:default;">📞 Sin teléfono</span>`}
+                        <button class="btn btn-confirmar" onclick="setEstadoJuzgado('${j.nid}','interesado')">✅ Interesado</button>
+                        <button class="btn btn-cancelar" onclick="setEstadoJuzgado('${j.nid}','no_interesado')">❌ No interesado</button>
+                    </div>
+                </div>`;
+            }).join('');
+        }
+
+        function marcarContactadoJuzgado(nid) {
+            // Solo marca contactado si no esta ya en interesado/no_interesado
+            const cur = juzgadoStateMap[nid];
+            if (cur === 'interesado' || cur === 'no_interesado') {
+                renderJuzgado();
+                return;
+            }
+            juzgadoStateMap[nid] = 'contactado';
+            guardarEstadoPermanente(nid, 'jz:contactado');
+            renderJuzgado();
+        }
+
+        function setEstadoJuzgado(nid, estado) {
+            // Toggle: si ya esta en ese estado, vuelve a contactado
+            const cur = juzgadoStateMap[nid];
+            const final = (cur === estado) ? '' : estado;
+            if (final) {
+                juzgadoStateMap[nid] = final;
+                guardarEstadoPermanente(nid, 'jz:' + final);
+                showToast(`NID ${nid} marcado como ${final}`, 'success');
+            } else {
+                delete juzgadoStateMap[nid];
+                guardarEstadoPermanente(nid, '');
+                showToast(`NID ${nid} vuelto a pendiente`, 'info');
+            }
+            renderJuzgado();
+        }
+
+        // Notificar comerciales con candidatos a juzgado (mailto, igual patron que canceladas)
+        function notificarJuzgadoMailto() {
+            // Tomar candidatos pendientes (sin gestionar)
+            const pendientes = (juzgado || []).filter(j => {
+                const st = getJuzgadoState(j.nid);
+                return st !== 'no_interesado' && st !== 'interesado';
+            });
+            if (pendientes.length === 0) {
+                showToast('No hay candidatos pendientes por gestionar', 'info');
+                return;
+            }
+            // Conteo por comercial
+            const porComercial = {};
+            pendientes.forEach(j => {
+                const e = (j.comercial || '').toLowerCase().trim();
+                if (e && e.includes('@')) {
+                    porComercial[e] = (porComercial[e] || 0) + 1;
+                }
+            });
+            const emails = Object.keys(porComercial);
+            if (emails.length === 0) {
+                showToast('No hay correos de comerciales para notificar', 'info');
+                return;
+            }
+            const totalCandidatos = pendientes.length;
+            const asunto = `Candidatos para levantamiento de patrimonio via Juzgado (${totalCandidatos})`;
+            const cuerpo =
+                `Hola,\n\n` +
+                `Tienes negocios con concepto desfavorable del Defensor de Familia que ahora pueden ` +
+                `levantar el patrimonio de familia via JUZGADO. Esta es una nueva opcion en Habi para ` +
+                `recuperar negocios que se habian perdido por este motivo.\n\n` +
+                `Total de candidatos pendientes en el equipo: ${totalCandidatos}\n\n` +
+                `Ingresa al portal y revisa la pestana "Juzgado" para ver tus NIDs especificos, ` +
+                `contactar a los clientes y registrar si estan interesados:\n\n` +
+                `${PAGE_URL}\n\n` +
+                `Saludos,\nEquipo Habi`;
+            const url = `mailto:?bcc=${encodeURIComponent(emails.join(','))}` +
+                        `&subject=${encodeURIComponent(asunto)}` +
+                        `&body=${encodeURIComponent(cuerpo)}`;
+            window.location.href = url;
+            showToast(`Abriendo Gmail con ${emails.length} comercial(es) en BCC`, 'success');
+        }
+
         // ==========================
         // TAB 3: POR PUBLICAR
         // ==========================
