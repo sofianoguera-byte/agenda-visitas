@@ -1179,8 +1179,15 @@
             grid.innerHTML = filtered.map(j => {
                 const st = getJuzgadoState(j.nid);
                 const phone = formatPhone(j.telefono_cliente);
+                // Primer nombre (capitalizado) si esta disponible. Los nombres de
+                // control_tower vienen en minusculas; ponemos title case.
+                const partes = (j.nombre_cliente || '').trim().split(/\s+/).filter(Boolean);
+                const primero = partes.length > 0
+                    ? partes[0].charAt(0).toUpperCase() + partes[0].slice(1).toLowerCase()
+                    : '';
+                const saludo = primero ? `Hola ${primero},` : 'Hola,';
                 const wppMsg = encodeURIComponent(
-                    `Hola,\n\n` +
+                    `${saludo}\n\n` +
                     `Te escribimos de Habi. Sabemos que no pudimos vender tu inmueble porque ` +
                     `no fue posible levantar el patrimonio de familia.\n\n` +
                     `Tenemos una nueva forma de hacerlo: a traves del juzgado. ` +
