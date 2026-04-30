@@ -498,16 +498,10 @@ def api_juzgado():
     Candidatos a la opcion de levantamiento via Juzgado.
     """
     query = """
-    WITH ult_etapa AS (
-      SELECT CAST(nid AS STRING) AS nid, dealstage, fecha_desistio_inmobiliaria,
-        ROW_NUMBER() OVER (PARTITION BY nid ORDER BY hs_lastmodifieddate DESC) AS rn
+    WITH inmo_pipeline AS (
+      SELECT DISTINCT CAST(nid AS STRING) AS nid
       FROM `papyrus-master.squad_bi_global.hubspot_deal`
       WHERE pipeline = '803674753' AND nid IS NOT NULL
-    ),
-    inmo_activo AS (
-      SELECT DISTINCT nid FROM ult_etapa
-      WHERE rn = 1 AND fecha_desistio_inmobiliaria IS NULL
-        AND dealstage NOT IN ('1182117639','closedwon','closedlost')
     ),
     -- control_tower trae el concepto del defensor + nombres y telefono en plano
     desfavorables AS (
@@ -535,15 +529,16 @@ def api_juzgado():
       cd.ciudad,
       -- preferir telefono plano de control_tower; fallback al de consolidado
       COALESCE(d.telefono_plano, cd.tel_fono_del_cliente_1) AS telefono_cliente,
-      d.nombre_cliente_plano AS nombre_cliente
+      d.nombre_cliente_plano AS nombre_cliente,
+      -- informativos: ya no filtran, pero permiten mostrar badge en la UI
+      DATE(cd.v_fecha_venta) AS fecha_venta,
+      DATE(cd.fecha_desistio_inmobiliaria) AS fecha_desistio
     FROM desfavorables d
-    JOIN inmo_activo ia ON ia.nid = d.nid
+    JOIN inmo_pipeline ip ON ip.nid = d.nid
     LEFT JOIN `papyrus-data.habi_wh_inmobiliaria.consolidado_habi_inmobiliaria` cd
       ON CAST(cd.nid AS STRING) = d.nid
     LEFT JOIN `papyrus-master.squad_bi_global.hubspot_deal` h
       ON SAFE_CAST(d.nid AS INT64) = h.nid AND h.pipeline = '803674753'
-    WHERE cd.v_fecha_venta IS NULL
-      AND cd.fecha_desistio_inmobiliaria IS NULL
     ORDER BY d.fecha_desfavorable DESC
     """
     try:
@@ -564,6 +559,8 @@ def api_juzgado():
                 "ciudad": (row.ciudad or "").title() if row.ciudad else "",
                 "telefono_cliente": clean(row.telefono_cliente),
                 "nombre_cliente": clean(row.nombre_cliente),
+                "fecha_venta": str(row.fecha_venta) if row.fecha_venta else "",
+                "fecha_desistio": str(row.fecha_desistio) if row.fecha_desistio else "",
             })
         return jsonify(out)
     except Exception as e:

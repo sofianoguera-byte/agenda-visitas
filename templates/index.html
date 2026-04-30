@@ -1259,6 +1259,8 @@
                     <div class="card-header">
                         <span class="nid-badge">NID ${j.nid}</span>
                         <span class="hora-badge" style="background:#fee2e2;color:#991b1b;">Desfavorable ${j.fecha_desfavorable || ''}</span>
+                        ${j.fecha_venta ? `<span class="hora-badge" style="background:#dcfce7;color:#166534;">Vendido ${j.fecha_venta}</span>` : ''}
+                        ${j.fecha_desistio ? `<span class="hora-badge" style="background:#f3f4f6;color:#4b5563;">Desistido ${j.fecha_desistio}</span>` : ''}
                     </div>
                     <div class="card-body">
                         <div class="field"><label>Cliente</label><span>${j.nombre_cliente || 'N/A'}</span></div>
