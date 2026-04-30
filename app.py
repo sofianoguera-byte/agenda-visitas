@@ -492,26 +492,46 @@ def api_canceladas():
     return jsonify({"canceladas": canceladas, "fechas_reporte": fechas_reporte})
 
 
-def _smtp_connect():
-    """Abre una conexion SMTP autenticada que se puede reusar para varios correos."""
+def _send_email(destinatario, asunto, cuerpo, _from_name="Habi Inmobiliaria"):
+    """Envia un correo. Usa SendGrid HTTPS si esta configurado (Render bloquea SMTP),
+    cae a SMTP si no hay API key (entorno local)."""
+    sg_key = os.environ.get("SENDGRID_API_KEY", "").strip()
+    from_email = os.environ.get("EMAIL_FROM", "sofianoguera@habi.co").strip()
+
+    if sg_key:
+        # SendGrid Web API v3 — HTTPS, no usa SMTP
+        payload = {
+            "personalizations": [{"to": [{"email": destinatario}]}],
+            "from": {"email": from_email, "name": _from_name},
+            "subject": asunto,
+            "content": [{"type": "text/plain", "value": cuerpo}],
+        }
+        r = http_requests.post(
+            "https://api.sendgrid.com/v3/mail/send",
+            headers={"Authorization": f"Bearer {sg_key}",
+                     "Content-Type": "application/json"},
+            json=payload,
+            timeout=15,
+        )
+        if r.status_code >= 300:
+            raise RuntimeError(f"SendGrid HTTP {r.status_code}: {r.text[:300]}")
+        return
+
+    # Fallback SMTP (entorno local). En Render fallara por bloqueo de red saliente.
     import smtplib
-    smtp_user = os.environ.get("SMTP_USER", "sofianoguera@habi.co")
-    smtp_pass = os.environ.get("SMTP_PASS", "nort eggi kzbc iotb")
-    server = smtplib.SMTP("smtp.gmail.com", 587, timeout=20)
-    server.starttls()
-    server.login(smtp_user, smtp_pass)
-    return server, smtp_user
-
-
-def _send_via(server, smtp_user, destinatario, asunto, cuerpo):
     from email.mime.text import MIMEText
     from email.mime.multipart import MIMEMultipart
+    smtp_user = os.environ.get("SMTP_USER", from_email)
+    smtp_pass = os.environ.get("SMTP_PASS", "nort eggi kzbc iotb")
     msg = MIMEMultipart()
     msg["From"] = smtp_user
     msg["To"] = destinatario
     msg["Subject"] = asunto
     msg.attach(MIMEText(cuerpo, "plain"))
-    server.send_message(msg)
+    with smtplib.SMTP("smtp.gmail.com", 587, timeout=15) as server:
+        server.starttls()
+        server.login(smtp_user, smtp_pass)
+        server.send_message(msg)
 
 
 def _notificar_canceladas_reagendar(forzar=False):
@@ -570,45 +590,29 @@ def _notificar_canceladas_reagendar(forzar=False):
         return resumen
     comerciales = [c for c in mapa.values() if c["nuevas"]]
 
-    # Una sola conexion SMTP reutilizada para todos los correos (ahorra 2-4s por correo)
-    server = None
-    smtp_user = None
-    try:
-        server, smtp_user = _smtp_connect()
-    except Exception as e:
-        resumen["motivo"] = f"smtp_connect_failed: {e}"
-        return resumen
-
-    try:
-        for c in comerciales:
-            nuevas_list = "\n".join(f"  - NID {n['nid']} (estaba agendado para {n['fecha']})" for n in c["nuevas"])
-            cuerpo = (
-                f"Hola {c['nombre']},\n\n"
-                f"Las siguientes visitas que tenias agendadas para ayer fueron canceladas, reagendalas:\n\n"
-                f"{nuevas_list}\n\n"
-            )
-            if c["pendientes"]:
-                pend = "\n".join(f"  - NID {n['nid']} (agendado para {n['fecha']})" for n in c["pendientes"])
-                cuerpo += f"Ademas, tienes estas canceladas de la semana pendientes por reagendar:\n\n{pend}\n\n"
-            cuerpo += f"Ingresa aqui para gestionarlas:\n{PAGE_URL}\n\nSaludos,\nEquipo Habi"
-            asunto = f"Visita(s) cancelada(s) ayer - Reagendar ({len(c['nuevas'])} nueva(s))"
-            item = {"email": c["email"], "nombre": c["nombre"],
-                    "nuevas": len(c["nuevas"]), "pendientes": len(c["pendientes"]),
-                    "ok": False, "error": ""}
-            try:
-                _send_via(server, smtp_user, c["email"], asunto, cuerpo)
-                item["ok"] = True
-                resumen["enviados"] += 1
-            except Exception as e:
-                item["error"] = str(e)
-                resumen["errores"] += 1
-            resumen["comerciales"].append(item)
-    finally:
+    for c in comerciales:
+        nuevas_list = "\n".join(f"  - NID {n['nid']} (estaba agendado para {n['fecha']})" for n in c["nuevas"])
+        cuerpo = (
+            f"Hola {c['nombre']},\n\n"
+            f"Las siguientes visitas que tenias agendadas para ayer fueron canceladas, reagendalas:\n\n"
+            f"{nuevas_list}\n\n"
+        )
+        if c["pendientes"]:
+            pend = "\n".join(f"  - NID {n['nid']} (agendado para {n['fecha']})" for n in c["pendientes"])
+            cuerpo += f"Ademas, tienes estas canceladas de la semana pendientes por reagendar:\n\n{pend}\n\n"
+        cuerpo += f"Ingresa aqui para gestionarlas:\n{PAGE_URL}\n\nSaludos,\nEquipo Habi"
+        asunto = f"Visita(s) cancelada(s) ayer - Reagendar ({len(c['nuevas'])} nueva(s))"
+        item = {"email": c["email"], "nombre": c["nombre"],
+                "nuevas": len(c["nuevas"]), "pendientes": len(c["pendientes"]),
+                "ok": False, "error": ""}
         try:
-            if server:
-                server.quit()
-        except Exception:
-            pass
+            _send_email(c["email"], asunto, cuerpo)
+            item["ok"] = True
+            resumen["enviados"] += 1
+        except Exception as e:
+            item["error"] = str(e)
+            resumen["errores"] += 1
+        resumen["comerciales"].append(item)
     return resumen
 
 
