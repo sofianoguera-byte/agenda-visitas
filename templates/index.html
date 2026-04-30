@@ -433,6 +433,21 @@
         </div>
     </div>
 
+    <!-- Modal confirmacion No interesado en juzgado -->
+    <div class="modal-overlay" id="modal-jz-noint">
+        <div class="modal">
+            <h2>Marcar como No interesado</h2>
+            <p>El cliente del NID <strong id="modal-jz-noint-nid"></strong> indicó que <strong>no le interesa</strong> el proceso por juzgado.</p>
+            <p style="color:#92400e;background:#fffbeb;padding:10px;border-radius:6px;font-size:13px;margin-top:10px;">
+                Al confirmar, este NID se agregará al <strong>sheet de desistidos</strong> y desaparecerá de esta pestaña.
+            </p>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" onclick="cerrarModalJzNoInt()">Cancelar</button>
+                <button class="btn btn-cancelar" onclick="confirmarJzNoInteresado()">Sí, marcar no interesado</button>
+            </div>
+        </div>
+    </div>
+
     <div class="modal-overlay" id="modal-desistir">
         <div class="modal">
             <h2>Confirmar desistimiento</h2>
@@ -1246,6 +1261,13 @@
             // Toggle: si ya esta en ese estado, vuelve a contactado
             const cur = juzgadoStateMap[nid];
             const final = (cur === estado) ? '' : estado;
+
+            // No interesado pasa por modal de confirmacion + se agrega a sheet desistidos
+            if (final === 'no_interesado') {
+                abrirModalJzNoInt(nid);
+                return;
+            }
+
             if (final) {
                 juzgadoStateMap[nid] = final;
                 guardarEstadoPermanente(nid, 'jz:' + final);
@@ -1256,6 +1278,41 @@
                 showToast(`NID ${nid} vuelto a pendiente`, 'info');
             }
             renderJuzgado();
+        }
+
+        let pendingJzNoIntNid = null;
+        function abrirModalJzNoInt(nid) {
+            pendingJzNoIntNid = nid;
+            document.getElementById('modal-jz-noint-nid').textContent = nid;
+            document.getElementById('modal-jz-noint').classList.add('active');
+        }
+        function cerrarModalJzNoInt() {
+            pendingJzNoIntNid = null;
+            document.getElementById('modal-jz-noint').classList.remove('active');
+        }
+        async function confirmarJzNoInteresado() {
+            if (!pendingJzNoIntNid) return;
+            const nid = pendingJzNoIntNid;
+            const j = juzgado.find(x => x.nid === nid);
+            // Agregar al sheet de desistidos (mismo Apps Script que usa Canceladas)
+            try {
+                await fetch('https://script.google.com/macros/s/AKfycbyvJCuniSwjN0tb6mfVuEsXwMPnXl9ChAHkhyOk0cK3tkxADBOAo6XQl1-sxKeyzT30Uw/exec', {
+                    method: 'POST',
+                    mode: 'no-cors',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        nid: nid,
+                        comercial: j ? j.comercial : '',
+                        origen: 'juzgado_no_interesado'
+                    })
+                });
+            } catch (e) { console.error(e); }
+            // Guardar estado en el Sheet principal con prefijo jz:
+            juzgadoStateMap[nid] = 'no_interesado';
+            guardarEstadoPermanente(nid, 'jz:no_interesado');
+            cerrarModalJzNoInt();
+            renderJuzgado();
+            showToast(`NID ${nid} marcado como No interesado y agregado a desistidos`, 'info');
         }
 
         // Notificar comerciales con candidatos a juzgado (mailto, igual patron que canceladas)
