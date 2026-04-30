@@ -728,6 +728,55 @@ def get_links_publicacion():
         return {}
 
 
+@app.route("/api/links")
+def api_links():
+    """Inmuebles del pipeline Inmo publicados con su link de publicacion del Sheet."""
+    query = """
+    WITH inmo AS (
+      SELECT DISTINCT CAST(nid AS STRING) AS nid
+      FROM `papyrus-master.squad_bi_global.hubspot_deal`
+      WHERE pipeline = '803674753' AND nid IS NOT NULL
+    )
+    SELECT
+      CAST(cd.nid AS STRING) AS nid,
+      DATE(cd.date_publication) AS fecha_publicacion,
+      COALESCE(h.hubspot_owner_id, cd.c_comercial_captacion) AS comercial,
+      COALESCE(h.equipo_sellers, cd.c_equipo_seller) AS equipo,
+      cd.ciudad
+    FROM `papyrus-data.habi_wh_inmobiliaria.consolidado_habi_inmobiliaria` cd
+    JOIN inmo ON inmo.nid = CAST(cd.nid AS STRING)
+    LEFT JOIN `papyrus-master.squad_bi_global.hubspot_deal` h
+      ON SAFE_CAST(cd.nid AS INT64) = h.nid AND h.pipeline = '803674753'
+    WHERE cd.date_publication IS NOT NULL
+    ORDER BY cd.date_publication DESC
+    """
+    try:
+        results = client.query(query).result()
+        links = get_links_publicacion()
+        out = []
+        seen = set()
+        for row in results:
+            nid = str(row.nid) if row.nid else ""
+            if not nid or nid in seen:
+                continue
+            seen.add(nid)
+            link = links.get(nid, "")
+            if not link:
+                continue  # solo mostrar los que tienen link en el Sheet
+            out.append({
+                "nid": nid,
+                "fecha_publicacion": str(row.fecha_publicacion) if row.fecha_publicacion else "",
+                "comercial": clean(row.comercial),
+                "equipo": clean(row.equipo),
+                "ciudad": (row.ciudad or "").title() if row.ciudad else "",
+                "link_publicacion": link,
+            })
+        return jsonify(out)
+    except Exception as e:
+        print(f"Error consultando links: {e}")
+        return jsonify([])
+
+
 @app.route("/api/por-agendar")
 def api_por_agendar():
     query = """

@@ -129,6 +129,7 @@
         <div class="tab" data-tab="publicar" onclick="switchTab('publicar')">Por Publicar</div>
         <div class="tab" data-tab="sinfotos" onclick="switchTab('sinfotos')">Por Publicar Sin Fotos</div>
         <div class="tab" data-tab="fotoscorreo" onclick="switchTab('fotoscorreo')">Por Publicar Fotos Correo</div>
+        <div class="tab" data-tab="links" onclick="switchTab('links')">Links</div>
     </div>
 
     <!-- TAB 1: Visitas de mañana -->
@@ -392,6 +393,39 @@
         </div>
     </div>
 
+    <!-- TAB Links: tabla con NID, comercial, fecha publicacion y link -->
+    <div class="tab-content" id="tab-links">
+        <div class="stats-bar">
+            <div class="stat-card"><div class="icon total">🔗</div><div class="info"><h3 id="stat-links-total">-</h3><p>Total publicados</p></div></div>
+        </div>
+        <div class="container">
+            <div class="search-bar">
+                <input type="text" id="search-links" placeholder="Buscar por NID, ciudad, comercial...">
+                <select id="filter-equipo-links"><option value="todos">Todos los equipos</option></select>
+                <select id="filter-comercial-links"><option value="todos">Todos los comerciales</option></select>
+                <select id="filter-mes-links"><option value="todos">Todos los meses</option></select>
+                <button class="btn" style="background:#6c3baa;font-size:13px;" onclick="descargarCSVLinks()">Descargar CSV</button>
+            </div>
+            <div id="loading-links" class="loading"><div class="spinner"></div><p>Cargando links...</p></div>
+            <div id="table-links-container" style="display:none;overflow-x:auto;">
+                <table style="width:100%;border-collapse:collapse;background:white;border-radius:12px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.06);">
+                    <thead>
+                        <tr style="background:#6c3baa;color:white;text-align:left;">
+                            <th style="padding:12px 16px;font-size:13px;">NID</th>
+                            <th style="padding:12px 16px;font-size:13px;">Comercial</th>
+                            <th style="padding:12px 16px;font-size:13px;">Equipo</th>
+                            <th style="padding:12px 16px;font-size:13px;">Ciudad</th>
+                            <th style="padding:12px 16px;font-size:13px;">Fecha Publicación</th>
+                            <th style="padding:12px 16px;font-size:13px;">Link</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tbody-links"></tbody>
+                </table>
+            </div>
+            <div id="empty-links" class="empty-state" style="display:none;"><h2>No hay links de publicación</h2><p>Asegúrate que el Sheet de links tenga datos.</p></div>
+        </div>
+    </div>
+
     <!-- Modales -->
     <div class="modal-overlay" id="modal-cancelar">
         <div class="modal">
@@ -553,6 +587,7 @@
             if (tab === 'agendar' && !agendarLoaded) fetchPorAgendar();
             if (tab === 'sinfotos' && !sinFotosLoaded) fetchSinFotos();
             if (tab === 'fotoscorreo' && !fotosCorreoLoaded) fetchFotosCorreo();
+            if (tab === 'links' && !linksLoaded) fetchLinks();
         }
 
         // --- Init ---
@@ -1838,6 +1873,99 @@
             const a = document.createElement('a');
             a.href = url;
             a.download = 'por_publicar_sin_fotos_' + new Date().toISOString().split('T')[0] + '.csv';
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+
+        // ==========================
+        // TAB LINKS: tabla con link de publicacion del Sheet
+        // ==========================
+        let linksData = [];
+        let linksLoaded = false;
+        document.getElementById('search-links').addEventListener('input', renderLinks);
+        document.getElementById('filter-equipo-links').addEventListener('change', renderLinks);
+        document.getElementById('filter-comercial-links').addEventListener('change', renderLinks);
+        document.getElementById('filter-mes-links').addEventListener('change', renderLinks);
+
+        async function fetchLinks() {
+            try {
+                document.getElementById('loading-links').style.display = 'block';
+                const res = await fetch('/api/links');
+                linksData = await res.json();
+                linksLoaded = true;
+                document.getElementById('loading-links').style.display = 'none';
+                if (!Array.isArray(linksData) || linksData.length === 0) {
+                    document.getElementById('empty-links').style.display = 'block';
+                    return;
+                }
+                document.getElementById('table-links-container').style.display = 'block';
+                buildFilterOptions(linksData, 'filter-equipo-links', 'equipo');
+                buildFilterOptions(linksData, 'filter-comercial-links', 'comercial');
+                buildMesOptions(linksData, 'filter-mes-links', 'fecha_publicacion');
+                renderLinks();
+            } catch (e) {
+                console.error('Error links:', e);
+                document.getElementById('loading-links').innerHTML = '<p style="color:#ef4444;">Error cargando links.</p>';
+            }
+        }
+
+        function getFilteredLinks() {
+            const search = (document.getElementById('search-links').value || '').toLowerCase().trim();
+            const eq = document.getElementById('filter-equipo-links').value;
+            const co = document.getElementById('filter-comercial-links').value;
+            const mes = document.getElementById('filter-mes-links').value;
+            return (linksData || []).filter(it => {
+                if (eq !== 'todos' && it.equipo !== eq) return false;
+                if (co !== 'todos' && it.comercial !== co) return false;
+                if (mes !== 'todos' && (it.fecha_publicacion || '').substring(0, 7) !== mes) return false;
+                if (search) {
+                    const blob = `${it.nid} ${it.ciudad} ${it.comercial}`.toLowerCase();
+                    if (!blob.includes(search)) return false;
+                }
+                return true;
+            });
+        }
+
+        function renderLinks() {
+            const filtered = getFilteredLinks();
+            document.getElementById('stat-links-total').textContent = filtered.length;
+            const tbody = document.getElementById('tbody-links');
+            if (filtered.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="6" style="padding:24px;text-align:center;color:#9ca3af;">Sin resultados</td></tr>';
+                return;
+            }
+            tbody.innerHTML = filtered.map(it => `
+                <tr style="border-bottom:1px solid #e5e7eb;">
+                    <td style="padding:10px 16px;font-size:13px;font-weight:600;">${it.nid || ''}</td>
+                    <td style="padding:10px 16px;font-size:13px;">${it.comercial || ''}</td>
+                    <td style="padding:10px 16px;font-size:13px;">${it.equipo || ''}</td>
+                    <td style="padding:10px 16px;font-size:13px;">${it.ciudad || ''}</td>
+                    <td style="padding:10px 16px;font-size:13px;">${it.fecha_publicacion || ''}</td>
+                    <td style="padding:10px 16px;font-size:13px;">
+                        ${it.link_publicacion
+                            ? `<a href="${it.link_publicacion}" target="_blank" style="color:#6c3baa;font-weight:600;text-decoration:none;">🔗 Abrir</a>`
+                            : '<span style="color:#9ca3af;">—</span>'}
+                    </td>
+                </tr>
+            `).join('');
+        }
+
+        function descargarCSVLinks() {
+            const filtered = getFilteredLinks();
+            if (filtered.length === 0) return;
+            const headers = ['NID','Comercial','Equipo','Ciudad','Fecha Publicacion','Link Publicacion'];
+            const rows = filtered.map(it => [
+                it.nid, it.comercial, it.equipo, it.ciudad,
+                it.fecha_publicacion, it.link_publicacion
+            ]);
+            const csv = [headers, ...rows]
+                .map(r => r.map(c => `"${(c || '').toString().replace(/"/g,'""')}"`).join(','))
+                .join('\n');
+            const blob = new Blob(['﻿' + csv], {type: 'text/csv;charset=utf-8;'});
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `links_publicacion_${new Date().toISOString().slice(0,10)}.csv`;
             a.click();
             URL.revokeObjectURL(url);
         }
