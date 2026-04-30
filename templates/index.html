@@ -169,7 +169,7 @@
             <div style="display:flex;justify-content:flex-end;margin-bottom:12px;">
                 <button id="btn-notificar-canceladas" class="btn"
                         style="background:#6c3baa;color:white;font-size:13px;padding:10px 16px;"
-                        onclick="abrirModalNotificarCanceladas()">
+                        onclick="notificarCanceladasMailto()">
                     📨 Notificar comerciales con canceladas
                 </button>
             </div>
@@ -994,63 +994,44 @@
             window.location.href = `mailto:${emails}?subject=${encodeURIComponent(asunto)}&body=${encodeURIComponent(cuerpo)}`;
         }
 
-        // ===== Notificar comerciales con canceladas (server-side, mismo correo del cron) =====
-        function abrirModalNotificarCanceladas() {
-            document.getElementById('notif-canc-loading').style.display = 'none';
-            document.getElementById('notif-canc-resultado').style.display = 'none';
-            document.getElementById('notif-canc-resultado').innerHTML = '';
-            document.getElementById('notif-canc-actions').style.display = 'flex';
-            document.getElementById('btn-confirmar-notif-canc').disabled = false;
-            document.getElementById('modal-notif-canc').classList.add('active');
-        }
-
-        function cerrarModalNotificarCanceladas() {
-            document.getElementById('modal-notif-canc').classList.remove('active');
-        }
-
-        async function confirmarNotificarCanceladas() {
-            const btn = document.getElementById('btn-confirmar-notif-canc');
-            btn.disabled = true;
-            document.getElementById('notif-canc-loading').style.display = 'block';
-            document.getElementById('notif-canc-actions').style.display = 'none';
-            try {
-                const res = await fetch('/api/notificar/canceladas', { method: 'POST' });
-                const data = await res.json();
-                document.getElementById('notif-canc-loading').style.display = 'none';
-                const resDiv = document.getElementById('notif-canc-resultado');
-                resDiv.style.display = 'block';
-                if (!data.ok) {
-                    resDiv.innerHTML = `<div style="color:#b91c1c;"><strong>Error:</strong> ${data.error || 'desconocido'}</div>`;
-                } else if (data.skipped) {
-                    resDiv.innerHTML = `<div style="color:#92400e;background:#fffbeb;padding:10px;border-radius:6px;">No se enviaron correos. Motivo: <strong>${data.motivo}</strong>.</div>`;
-                } else if (data.motivo === 'sin_canceladas_nuevas') {
-                    resDiv.innerHTML = `<div style="color:#1f6b3f;background:#f0fdf4;padding:10px;border-radius:6px;">✅ No hay cancelaciones nuevas para notificar.</div>`;
-                } else {
-                    const filas = (data.comerciales || []).map(c => {
-                        const ic = c.ok ? '✅' : '❌';
-                        const detalle = c.ok ? `${c.nuevas} nueva(s), ${c.pendientes} pendiente(s)` : `<span style="color:#b91c1c;">${c.error}</span>`;
-                        return `<div style="padding:6px 0;border-bottom:1px solid #f3f4f6;">${ic} <strong>${c.nombre || c.email}</strong> <span style="color:#6b7280;">— ${detalle}</span></div>`;
-                    }).join('');
-                    resDiv.innerHTML = `
-                        <div style="margin-bottom:8px;font-weight:600;">Enviados: ${data.enviados} · Errores: ${data.errores}</div>
-                        ${filas}
-                    `;
-                }
-                // Mostrar resultado y dejar el boton habilitado para reintentar
-                document.getElementById('notif-canc-actions').style.display = 'flex';
-                document.getElementById('btn-confirmar-notif-canc').style.display = 'inline-flex';
-                document.getElementById('btn-confirmar-notif-canc').disabled = false;
-                document.getElementById('btn-confirmar-notif-canc').textContent = 'Enviar de nuevo';
-            } catch (err) {
-                document.getElementById('notif-canc-loading').style.display = 'none';
-                const resDiv = document.getElementById('notif-canc-resultado');
-                resDiv.style.display = 'block';
-                resDiv.innerHTML = `<div style="color:#b91c1c;"><strong>Error de red:</strong> ${err.message}</div>`;
-                document.getElementById('notif-canc-actions').style.display = 'flex';
-                document.getElementById('btn-confirmar-notif-canc').style.display = 'inline-flex';
-                document.getElementById('btn-confirmar-notif-canc').disabled = false;
-                document.getElementById('btn-confirmar-notif-canc').textContent = 'Reintentar';
+        // ===== Notificar comerciales con canceladas (mailto: abre tu Gmail) =====
+        // Usa el mismo patron que notificarTodos() del tab Visitas Mañana:
+        // construye un mailto con todos los comerciales en BCC y abre Gmail.
+        // Asi el correo sale desde TU cuenta de Habi (no spam) sin pasar por
+        // un servidor externo.
+        function notificarCanceladasMailto() {
+            // Tomar comerciales unicos de la lista de canceladas pendientes
+            // (que no estan ya 'agendado' o 'desistido')
+            const pendientes = (canceladas || []).filter(c => {
+                const cc = cancelContactMap[c.nid] || '';
+                return cc !== 'agendado' && cc !== 'desistido';
+            });
+            const emailsSet = new Set();
+            pendientes.forEach(c => {
+                const e = (c.comercial || '').trim();
+                if (e && e.includes('@')) emailsSet.add(e.toLowerCase());
+            });
+            const emails = Array.from(emailsSet);
+            if (emails.length === 0) {
+                showToast('No hay comerciales con canceladas pendientes por reagendar', 'info');
+                return;
             }
+            const asunto = `Visitas canceladas pendientes por reagendar (${pendientes.length})`;
+            const cuerpo =
+                `Hola,\n\n` +
+                `Tienes visita(s) cancelada(s) pendiente(s) por reagendar.\n\n` +
+                `Ingresa al portal y revisa la pestana "Canceladas por Reagendar" ` +
+                `para ver tus NIDs especificos y reagendarlas:\n\n` +
+                `${PAGE_URL}\n\n` +
+                `Total de cancelaciones pendientes en el equipo: ${pendientes.length}\n\n` +
+                `Saludos,\nEquipo Habi`;
+            // Todos los comerciales en BCC, con tu propio correo en To
+            // (asi tu Gmail acepta abrir el compose y mantiene privacidad entre destinatarios)
+            const url = `mailto:?bcc=${encodeURIComponent(emails.join(','))}` +
+                        `&subject=${encodeURIComponent(asunto)}` +
+                        `&body=${encodeURIComponent(cuerpo)}`;
+            window.location.href = url;
+            showToast(`Abriendo Gmail con ${emails.length} comercial(es) en BCC`, 'success');
         }
         // ==========================
         // TAB 3: POR PUBLICAR
