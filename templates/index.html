@@ -175,11 +175,6 @@
                     📨 Notificar comerciales con canceladas pendientes
                 </button>
                 <button class="btn"
-                        style="background:#0ea5e9;color:white;font-size:13px;padding:10px 16px;"
-                        onclick="notificarTodasCanceladasMailto()">
-                    📨 Enviar a TODOS los comerciales con canceladas (incluso reagendadas)
-                </button>
-                <button class="btn"
                         style="background:#16a34a;color:white;font-size:13px;padding:10px 16px;"
                         onclick="notificarLideres()">
                     📊 Notificar líderes con resumen del equipo
@@ -1127,39 +1122,6 @@
                 `Saludos,\nEquipo Habi`;
             // Todos los comerciales en BCC, con tu propio correo en To
             // (asi tu Gmail acepta abrir el compose y mantiene privacidad entre destinatarios)
-            const url = `mailto:?bcc=${encodeURIComponent(emails.join(','))}` +
-                        `&subject=${encodeURIComponent(asunto)}` +
-                        `&body=${encodeURIComponent(cuerpo)}`;
-            window.location.href = url;
-            showToast(`Abriendo Gmail con ${emails.length} comercial(es) en BCC`, 'success');
-        }
-
-        // Variante: TODAS las canceladas del periodo (no filtra pendientes).
-        // Sirve cuando no hubo canceladas ayer pero queremos pinchar a los
-        // comerciales para que reagenden las que aun tienen abiertas.
-        function notificarTodasCanceladasMailto() {
-            const todas = canceladas || [];
-            const emailsSet = new Set();
-            todas.forEach(c => {
-                const e = (c.comercial || '').trim();
-                if (e && e.includes('@')) emailsSet.add(e.toLowerCase());
-            });
-            const emails = Array.from(emailsSet);
-            if (emails.length === 0) {
-                showToast('No hay canceladas en el periodo', 'info');
-                return;
-            }
-            const asunto = `Visitas canceladas — revisar y reagendar (${todas.length})`;
-            const cuerpo =
-                `Hola,\n\n` +
-                `Hay visitas cancelas en el periodo que requieren tu revision. ` +
-                `Algunas pueden estar ya reagendadas, pero queremos que valides ` +
-                `el listado completo en el portal:\n\n` +
-                `${PAGE_URL}\n\n` +
-                `Total de cancelaciones del periodo en el equipo: ${todas.length}\n\n` +
-                `Por favor entra a la pestana "Canceladas por Reagendar" y ` +
-                `confirma el estado de cada NID.\n\n` +
-                `Saludos,\nEquipo Habi`;
             const url = `mailto:?bcc=${encodeURIComponent(emails.join(','))}` +
                         `&subject=${encodeURIComponent(asunto)}` +
                         `&body=${encodeURIComponent(cuerpo)}`;
