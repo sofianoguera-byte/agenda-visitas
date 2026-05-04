@@ -505,6 +505,27 @@ def api_visitas():
 def api_canceladas():
     dias = request.args.get("dias", 30, type=int)  # default 30 dias hacia atras
     canceladas, fechas_reporte = leer_canceladas_correo(dias)
+
+    # Enriquecemos cada cancelada con un flag "tiene_fotos_profesionales"
+    # (source_image_id = 1). Sirve para que el front excluya del correo a
+    # comerciales cuyos NIDs ya estan publicados con fotos profesionales.
+    try:
+        nids_id1 = set()
+        q = """
+        SELECT DISTINCT CAST(pc.nid AS STRING) AS nid
+        FROM `papyrus-data.habi_brokers_listing.property_card` pc
+        INNER JOIN `papyrus-data.habi_brokers_listing.property_image` pi
+          ON pc.id = pi.property_card_id
+        WHERE pi.source_image_id = 1
+          AND (pi.deleted_at IS NULL)
+        """
+        for row in client.query(q).result():
+            nids_id1.add(str(row.nid))
+        for c in canceladas:
+            c["tiene_fotos_profesionales"] = str(c.get("nid", "")) in nids_id1
+    except Exception as e:
+        print(f"Error enriqueciendo canceladas con flag id=1: {e}")
+
     return jsonify({"canceladas": canceladas, "fechas_reporte": fechas_reporte})
 
 

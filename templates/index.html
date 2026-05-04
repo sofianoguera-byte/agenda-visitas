@@ -1095,11 +1095,15 @@
         // Asi el correo sale desde TU cuenta de Habi (no spam) sin pasar por
         // un servidor externo.
         function notificarCanceladasMailto() {
-            // Tomar comerciales unicos de la lista de canceladas pendientes
-            // (que no estan ya 'agendado' o 'desistido')
+            // Tomar comerciales unicos de la lista de canceladas pendientes:
+            //   - No marcadas como 'agendado' o 'desistido' (estado del Sheet)
+            //   - No publicadas con fotos profesionales (source_image_id = 1)
+            //     porque esos NIDs ya estan en flujo y no necesitan reagenda.
             const pendientes = (canceladas || []).filter(c => {
                 const cc = cancelContactMap[c.nid] || '';
-                return cc !== 'agendado' && cc !== 'desistido';
+                if (cc === 'agendado' || cc === 'desistido') return false;
+                if (c.tiene_fotos_profesionales) return false;
+                return true;
             });
             const emailsSet = new Set();
             pendientes.forEach(c => {
