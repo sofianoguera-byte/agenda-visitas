@@ -1086,20 +1086,37 @@ def api_por_publicar():
 
 
 def leer_nids_fotos_cliente():
-    """Lee NIDs de correos con asunto 'Publicación Fotos cliente'."""
+    """Lee NIDs de correos con asunto 'Fotos cliente' de los últimos 60 días.
+
+    Optimizaciones aplicadas porque la version anterior se colgaba en
+    Render free tier:
+      - Filtro IMAP SINCE: solo últimos 60 días (drasticamente menos correos)
+      - BODY.PEEK[HEADER] en vez de RFC822: solo trae el header, no el body
+      - Timeout 25s a nivel socket: falla rapido si Gmail está lento
+      - Decode header import movido fuera del loop
+    """
+    from email.header import decode_header
     nids = []
     try:
-        mail = imaplib.IMAP4_SSL("imap.gmail.com")
+        mail = imaplib.IMAP4_SSL("imap.gmail.com", timeout=25)
         mail.login(EMAIL_USER, EMAIL_PASS)
-        mail.select("inbox")
-        status, messages = mail.search(None, 'SUBJECT "Fotos cliente"')
+        mail.select("inbox", readonly=True)
+
+        # Filtro de fecha: ultimos 60 días
+        desde = (datetime.now() - timedelta(days=60)).strftime("%d-%b-%Y")
+        status, messages = mail.search(None, f'(SINCE "{desde}" SUBJECT "Fotos cliente")')
+        if status != "OK":
+            mail.logout()
+            return []
+
         ids = messages[0].split()
         for msg_id in ids:
-            status, data = mail.fetch(msg_id, "(RFC822)")
+            # PEEK[HEADER] solo trae los headers (no el body completo)
+            status, data = mail.fetch(msg_id, "(BODY.PEEK[HEADER])")
+            if status != "OK" or not data or not data[0]:
+                continue
             msg = email_lib.message_from_bytes(data[0][1])
             subject = msg["subject"] or ""
-            # Decodificar subject
-            from email.header import decode_header
             decoded_parts = decode_header(subject)
             subj = ""
             for part, enc in decoded_parts:
@@ -1107,10 +1124,8 @@ def leer_nids_fotos_cliente():
                     subj += part.decode(enc or "utf-8", errors="replace")
                 else:
                     subj += part
-            # Extraer NID de entre parentesis: (58488002593)
             nid_match = re.search(r"\((\d{8,})\)", subj)
             if not nid_match:
-                # Fallback: NID al inicio del asunto
                 nid_match = re.search(r"(\d{8,})", subj)
             if nid_match:
                 nids.append(nid_match.group(1))
