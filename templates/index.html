@@ -1116,12 +1116,22 @@
         }
 
         function notificarCanceladasMailto() {
-            // Solo canceladas reportadas AYER, pendientes y sin fotos prof.
-            const ayer = new Date();
-            ayer.setDate(ayer.getDate() - 1);
-            const ayerStr = _yyyyMmDd(ayer);
+            // Canceladas con fecha_agendada en el ultimo dia habil:
+            //   - Lunes mira viernes/sabado/domingo (3 dias atras)
+            //   - Resto de dias mira solo ayer
+            // Filtra pendientes y sin fotos profesionales.
+            const hoy = new Date();
+            const dow = hoy.getDay(); // 0=dom, 1=lun, ... 6=sab
+            const diasAtras = (dow === 1) ? 3 : 1; // lunes mira hasta viernes
+            const fechasValidas = new Set();
+            for (let i = 1; i <= diasAtras; i++) {
+                const d = new Date();
+                d.setDate(d.getDate() - i);
+                fechasValidas.add(_yyyyMmDd(d));
+            }
             const pendientes = _filtrarPendientes(canceladas).filter(c => {
-                return (c.fecha_reporte || '').startsWith(ayerStr);
+                const f = (c.fecha_agendada || '').slice(0, 10);
+                return fechasValidas.has(f);
             });
             const emailsSet = new Set();
             pendientes.forEach(c => {
@@ -1156,7 +1166,7 @@
             const hoy = new Date();
             const mesPref = hoy.toISOString().slice(0, 7); // YYYY-MM
             const pendientes = _filtrarPendientes(canceladas).filter(c => {
-                return (c.fecha_reporte || '').startsWith(mesPref);
+                return (c.fecha_agendada || '').slice(0, 10).startsWith(mesPref);
             });
             const emailsSet = new Set();
             pendientes.forEach(c => {
@@ -1207,16 +1217,17 @@
                     equipos.map(e => (e.email || '').trim().toLowerCase()).filter(e => e && e.includes('@'))
                 ));
                 let cuerpo = `Hola lideres,\n\n` +
-                    `Comparto el resumen de pendientes por equipo. Por favor ` +
-                    `gestionen con sus equipos lo siguiente:\n\n`;
+                    `Comparto el resumen de pendientes por equipo. Por favor, ` +
+                    `gestionen con sus equipos los siguientes puntos:\n\n`;
                 equipos.forEach(e => {
                     cuerpo += `EQUIPO: ${e.equipo}\n`;
                     cuerpo += `  • Por agendar: ${e.por_agendar}` +
-                              ` (${e.por_agendar_2025} de 2025 o antes — URGENTE confirmar si desistir o agendar)\n`;
+                              ` (de los cuales ${e.por_agendar_2025} son del 2025 o antes — URGENTE confirmar si desistir o agendar)\n`;
                     cuerpo += `  • Canceladas pendientes del mes: ${e.canceladas}\n`;
                     cuerpo += `  • Candidatos juzgado: ${e.juzgado}\n\n`;
                 });
-                cuerpo += `Portal: ${PAGE_URL}\n\nSaludos,\nEquipo Habi Inmobiliaria`;
+                cuerpo += `Pueden ver el detalle por NID y filtrar por equipo aqui:\n${PAGE_URL}\n\n` +
+                          `Saludos,\nEquipo Habi Inmobiliaria`;
                 const asunto = `Resumen Inmobiliaria — pendientes por equipo`;
                 const url = `mailto:${encodeURIComponent(emails.join(','))}` +
                             `?subject=${encodeURIComponent(asunto)}` +
