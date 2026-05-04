@@ -890,40 +890,53 @@ def _resumen_lideres_por_equipo():
     return resumen
 
 
+@app.route("/api/notificar/lideres-resumen", methods=["GET"])
+def api_notificar_lideres_resumen():
+    """Devuelve el resumen por equipo + email del lider configurado, SIN
+    enviar correos. El front lo usa para componer mailto desde la cuenta
+    de la persona (no desde el SMTP del servidor)."""
+    try:
+        resumen_eq = _resumen_lideres_por_equipo()
+        out = []
+        for equipo, datos in sorted(resumen_eq.items()):
+            total_acciones = (datos["por_agendar"] + datos["canceladas"]
+                              + datos["juzgado"])
+            if total_acciones == 0:
+                continue
+            email_lider = (LIDERES_EQUIPO.get(equipo) or "").strip() \
+                          or LIDER_DEFAULT_EMAIL
+            out.append({"equipo": equipo, "email": email_lider, **datos})
+        return jsonify({"ok": True, "equipos": out})
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
 @app.route("/api/notificar/lideres", methods=["POST"])
 def api_notificar_lideres():
-    """Envia un correo de resumen al lider de cada equipo con sus pendientes:
-       - Por agendar (total + cuantos son de 2025 o antes)
-       - Canceladas pendientes del mes
-       - Candidatos a juzgado
-    """
+    """[OBSOLETO — usar mailto desde el front] Envia via SMTP del servidor.
+    Se deja por compatibilidad pero el front ya no lo llama."""
     try:
         PAGE_URL = "https://agenda-visitas-wcdm.onrender.com"
         resumen_eq = _resumen_lideres_por_equipo()
         out = {"enviados": 0, "errores": 0, "skipped": 0, "detalle": []}
         for equipo, datos in sorted(resumen_eq.items()):
-            # saltar equipos sin nada accionable
             total_acciones = (datos["por_agendar"] + datos["canceladas"]
                               + datos["juzgado"])
             if total_acciones == 0:
                 out["skipped"] += 1
                 continue
-
             email_lider = (LIDERES_EQUIPO.get(equipo) or "").strip() \
                           or LIDER_DEFAULT_EMAIL
             asunto = f"Resumen Inmobiliaria — equipo {equipo}"
             cuerpo = (
                 f"Hola lider de {equipo},\n\n"
-                f"Te compartimos el resumen de tu equipo. Por favor ayudanos a "
-                f"gestionar con tu equipo lo siguiente:\n\n"
                 f"  • Negocios POR AGENDAR: {datos['por_agendar']}\n"
-                f"      ↳ De estos, {datos['por_agendar_2025']} son del 2025 o "
-                f"antes — confirma URGENTE si se deben desistir o agendar.\n\n"
-                f"  • Canceladas POR REAGENDAR (este mes): {datos['canceladas']}\n\n"
-                f"  • Candidatos para JUZGADO (concepto desfavorable Defensor): "
-                f"{datos['juzgado']}\n\n"
-                f"Ingresa al portal para ver el detalle por NID:\n{PAGE_URL}\n\n"
-                f"Saludos,\nEquipo Habi Inmobiliaria"
+                f"      ↳ De 2025 o antes (urgente): {datos['por_agendar_2025']}\n"
+                f"  • Canceladas POR REAGENDAR (este mes): {datos['canceladas']}\n"
+                f"  • Candidatos JUZGADO: {datos['juzgado']}\n\n"
+                f"Portal: {PAGE_URL}\n\nSaludos,\nEquipo Habi"
             )
             item = {"equipo": equipo, "email": email_lider, **datos,
                     "ok": False, "error": ""}

@@ -172,7 +172,12 @@
                 <button class="btn"
                         style="background:#6c3baa;color:white;font-size:13px;padding:10px 16px;"
                         onclick="notificarCanceladasMailto()">
-                    📨 Notificar comerciales con canceladas pendientes
+                    📨 Notificar comerciales con canceladas de AYER (pendientes)
+                </button>
+                <button class="btn"
+                        style="background:#0ea5e9;color:white;font-size:13px;padding:10px 16px;"
+                        onclick="notificarCanceladasDelMesMailto()">
+                    📨 Notificar comerciales con canceladas DEL MES (pendientes)
                 </button>
                 <button class="btn"
                         style="background:#16a34a;color:white;font-size:13px;padding:10px 16px;"
@@ -1094,16 +1099,29 @@
         // construye un mailto con todos los comerciales en BCC y abre Gmail.
         // Asi el correo sale desde TU cuenta de Habi (no spam) sin pasar por
         // un servidor externo.
-        function notificarCanceladasMailto() {
-            // Tomar comerciales unicos de la lista de canceladas pendientes:
-            //   - No marcadas como 'agendado' o 'desistido' (estado del Sheet)
-            //   - No publicadas con fotos profesionales (source_image_id = 1)
-            //     porque esos NIDs ya estan en flujo y no necesitan reagenda.
-            const pendientes = (canceladas || []).filter(c => {
+        // Filtro base de pendientes (sin importar fecha):
+        //   - cc != agendado y cc != desistido (estado del Sheet)
+        //   - tiene_fotos_profesionales (id=1) == false
+        function _filtrarPendientes(arr) {
+            return (arr || []).filter(c => {
                 const cc = cancelContactMap[c.nid] || '';
                 if (cc === 'agendado' || cc === 'desistido') return false;
                 if (c.tiene_fotos_profesionales) return false;
                 return true;
+            });
+        }
+
+        function _yyyyMmDd(d) {
+            return d.toISOString().slice(0, 10);
+        }
+
+        function notificarCanceladasMailto() {
+            // Solo canceladas reportadas AYER, pendientes y sin fotos prof.
+            const ayer = new Date();
+            ayer.setDate(ayer.getDate() - 1);
+            const ayerStr = _yyyyMmDd(ayer);
+            const pendientes = _filtrarPendientes(canceladas).filter(c => {
+                return (c.fecha_reporte || '').startsWith(ayerStr);
             });
             const emailsSet = new Set();
             pendientes.forEach(c => {
@@ -1133,28 +1151,78 @@
             showToast(`Abriendo Gmail con ${emails.length} comercial(es) en BCC`, 'success');
         }
 
-        // Notifica a los lideres de cada equipo con resumen agregado.
-        // Llama al backend que envia los correos via SMTP usando la lista
-        // LIDERES_EQUIPO configurada en app.py.
-        async function notificarLideres() {
-            if (!confirm('Se enviara un correo a cada lider de equipo con el ' +
-                         'resumen (por agendar, canceladas, juzgado). ¿Continuar?')) {
+        // Notifica comerciales con canceladas pendientes DEL MES (no solo ayer).
+        function notificarCanceladasDelMesMailto() {
+            const hoy = new Date();
+            const mesPref = hoy.toISOString().slice(0, 7); // YYYY-MM
+            const pendientes = _filtrarPendientes(canceladas).filter(c => {
+                return (c.fecha_reporte || '').startsWith(mesPref);
+            });
+            const emailsSet = new Set();
+            pendientes.forEach(c => {
+                const e = (c.comercial || '').trim();
+                if (e && e.includes('@')) emailsSet.add(e.toLowerCase());
+            });
+            const emails = Array.from(emailsSet);
+            if (emails.length === 0) {
+                showToast('No hay comerciales con canceladas pendientes del mes', 'info');
                 return;
             }
-            showToast('Enviando correos a lideres...', 'info');
+            const asunto = `Canceladas pendientes del mes — reagendar (${pendientes.length})`;
+            const cuerpo =
+                `Hola,\n\n` +
+                `Tienes visita(s) cancelada(s) del mes pendiente(s) por reagendar. ` +
+                `No incluimos las que ya marcaste como reagendadas o desistidas, ` +
+                `ni las que ya estan publicadas con fotos profesionales.\n\n` +
+                `Ingresa al portal y revisa la pestana "Canceladas por Reagendar":\n\n` +
+                `${PAGE_URL}\n\n` +
+                `Total de cancelaciones pendientes del mes en el equipo: ${pendientes.length}\n\n` +
+                `Saludos,\nEquipo Habi`;
+            const url = `mailto:?bcc=${encodeURIComponent(emails.join(','))}` +
+                        `&subject=${encodeURIComponent(asunto)}` +
+                        `&body=${encodeURIComponent(cuerpo)}`;
+            window.location.href = url;
+            showToast(`Abriendo Gmail con ${emails.length} comercial(es) en BCC (${pendientes.length} pendientes del mes)`, 'success');
+        }
+
+        // Notifica a los lideres con resumen — usa MAILTO desde tu Gmail
+        // (el endpoint backend es solo para obtener el resumen por equipo).
+        async function notificarLideres() {
+            showToast('Cargando resumen de equipos...', 'info');
             try {
-                const r = await fetch('/api/notificar/lideres', { method: 'POST' });
+                const r = await fetch('/api/notificar/lideres-resumen');
                 const data = await r.json();
                 if (!data.ok) {
                     showToast(`Error: ${data.error || 'desconocido'}`, 'error');
                     return;
                 }
-                const det = (data.detalle || [])
-                    .map(d => `  • ${d.equipo} → ${d.email} ${d.ok ? '✅' : '❌ ' + (d.error || '')}`)
-                    .join('\n');
-                const msg = `Enviados: ${data.enviados} · Errores: ${data.errores} · ` +
-                            `Saltados (sin pendientes): ${data.skipped}\n\n${det}`;
-                alert(msg);
+                const equipos = data.equipos || [];
+                if (equipos.length === 0) {
+                    showToast('No hay equipos con pendientes', 'info');
+                    return;
+                }
+                // Construimos UN solo correo a TODOS los lideres en TO,
+                // con un bloque por equipo en el cuerpo.
+                const emails = Array.from(new Set(
+                    equipos.map(e => (e.email || '').trim().toLowerCase()).filter(e => e && e.includes('@'))
+                ));
+                let cuerpo = `Hola lideres,\n\n` +
+                    `Comparto el resumen de pendientes por equipo. Por favor ` +
+                    `gestionen con sus equipos lo siguiente:\n\n`;
+                equipos.forEach(e => {
+                    cuerpo += `EQUIPO: ${e.equipo}\n`;
+                    cuerpo += `  • Por agendar: ${e.por_agendar}` +
+                              ` (${e.por_agendar_2025} de 2025 o antes — URGENTE confirmar si desistir o agendar)\n`;
+                    cuerpo += `  • Canceladas pendientes del mes: ${e.canceladas}\n`;
+                    cuerpo += `  • Candidatos juzgado: ${e.juzgado}\n\n`;
+                });
+                cuerpo += `Portal: ${PAGE_URL}\n\nSaludos,\nEquipo Habi Inmobiliaria`;
+                const asunto = `Resumen Inmobiliaria — pendientes por equipo`;
+                const url = `mailto:${encodeURIComponent(emails.join(','))}` +
+                            `?subject=${encodeURIComponent(asunto)}` +
+                            `&body=${encodeURIComponent(cuerpo)}`;
+                window.location.href = url;
+                showToast(`Abriendo Gmail con ${emails.length} lider(es) y ${equipos.length} equipo(s)`, 'success');
             } catch (e) {
                 showToast(`Error: ${e.message}`, 'error');
             }
