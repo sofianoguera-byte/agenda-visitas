@@ -38,6 +38,22 @@ client = bigquery.Client(project="papyrus-data")
 EMAIL_USER = os.environ.get("EMAIL_USER", "")
 EMAIL_PASS = os.environ.get("EMAIL_PASS", "")
 
+# ---------------------------------------------------------------------------
+# Líderes por equipo. La key debe coincidir EXACTO con c_equipo_seller en BQ.
+# Si un equipo no aparece aquí, los correos van a LIDER_DEFAULT_EMAIL.
+# ---------------------------------------------------------------------------
+LIDERES_EQUIPO = {
+    "Centro + Aledaños":         os.environ.get("LIDER_CENTRO", ""),
+    "Zona Norte":                os.environ.get("LIDER_NORTE", ""),
+    "Zona Sur 1":                os.environ.get("LIDER_SUR1", ""),
+    "Barranquilla":              os.environ.get("LIDER_BAQ", ""),
+    "Cali":                      os.environ.get("LIDER_CALI", ""),
+    "Medellín":                  os.environ.get("LIDER_MED", ""),
+    "Exclusivo inmobiliaria CO": os.environ.get("LIDER_EXCL", ""),
+    "Captación automática":      os.environ.get("LIDER_AUTO", ""),
+}
+LIDER_DEFAULT_EMAIL = os.environ.get("LIDER_DEFAULT", "sofianoguera@habi.co")
+
 
 def get_fecha_manana():
     return (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
@@ -701,6 +717,204 @@ def api_notificar_canceladas():
     try:
         resumen = _notificar_canceladas_reagendar(forzar=True)
         return jsonify({"ok": True, **resumen})
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+def _resumen_lideres_por_equipo():
+    """Computa por equipo: por agendar (total + de 2025), canceladas
+    pendientes del mes, juzgado candidatos. Devuelve dict equipo -> contadores."""
+    PAGE_URL = "https://agenda-visitas-wcdm.onrender.com"
+    primer_dia_mes = datetime.now().strftime("%Y-%m-01")
+
+    # 1. POR AGENDAR — usamos la misma lógica que /api/por-agendar pero
+    #    agregando por equipo y contando los del 2025
+    q_por_agendar = """
+    WITH bubble_unica AS (
+      SELECT * FROM (
+        SELECT b.nid, b.status, b.modified_date,
+          ROW_NUMBER() OVER (PARTITION BY b.nid ORDER BY b.modified_date DESC) AS rn
+        FROM `papyrus-master.bubble_gold.mart_bubble_schedule_co` b
+        WHERE b.visit_category = 'Habi Inmobiliaria'
+      ) WHERE rn = 1
+    ),
+    tiene_fotos_cliente AS (
+      SELECT DISTINCT pc.nid
+      FROM `papyrus-data.habi_brokers_listing.property_card` pc
+      INNER JOIN `papyrus-data.habi_brokers_listing.property_image` pi
+        ON pc.id = pi.property_card_id
+      WHERE pi.source_image_id = 3
+    ),
+    nids_con_finalizado AS (
+      SELECT DISTINCT nid
+      FROM `papyrus-master.bubble_gold.mart_bubble_schedule_co`
+      WHERE visit_category = 'Habi Inmobiliaria' AND status = 'Finalizado'
+    ),
+    gravamen_sellers AS (
+      SELECT nid, ANY_VALUE(gravamenes_del_apartamento) AS gravamen
+      FROM `papyrus-data.habi_wh_inmobiliaria.habiinmobiliaria_sellers_gestion`
+      GROUP BY nid
+    )
+    SELECT
+      COALESCE(NULLIF(h.equipo_sellers, ''),
+               NULLIF(cd.c_equipo_seller, ''),
+               'Sin equipo') AS equipo,
+      COUNT(*) AS total,
+      COUNTIF(EXTRACT(YEAR FROM cd.c_fecha_captacion) <= 2025) AS de_2025_o_antes
+    FROM `papyrus-data.habi_wh_inmobiliaria.consolidado_habi_inmobiliaria` cd
+    LEFT JOIN bubble_unica b ON CAST(cd.nid AS STRING) = b.nid
+    LEFT JOIN `papyrus-delivery-data.inmobiliaria.detalle_estado_captaciones` d ON cd.nid = d.nid
+    LEFT JOIN `papyrus-master.squad_bi_global.hubspot_deal` h
+      ON SAFE_CAST(cd.nid AS INT64) = h.nid AND h.pipeline = '803674753'
+    LEFT JOIN tiene_fotos_cliente fc ON cd.nid = fc.nid
+    LEFT JOIN gravamen_sellers gs ON cd.nid = gs.nid
+    WHERE cd.c_fecha_captacion IS NOT NULL
+      AND cd.fecha_desistio_inmobiliaria IS NULL
+      AND h.fecha_desistio_inmobiliaria IS NULL
+      AND cd.v_fecha_venta IS NULL
+      AND dealstage != '1182117639'
+      AND (cd.date_publication IS NULL
+           OR (fc.nid IS NOT NULL AND DATE(cd.date_publication) >= DATE '2026-04-13'))
+      AND CAST(cd.nid AS STRING) NOT IN (SELECT nid FROM nids_con_finalizado)
+      AND (b.nid IS NULL OR b.status NOT IN ('Agendado', 'Cerrado'))
+      AND (
+        d.estado_patrimonio IN ('Sin patrimonio', 'Patrimonio levantado')
+        OR (d.estado_patrimonio IS NULL
+            AND (gs.gravamen IS NULL
+                 OR gs.gravamen NOT IN ('Hipoteca + Patrimonio con hijos', 'Patrimonio hijos')))
+      )
+      AND LOWER(COALESCE(cd.ciudad, '')) NOT LIKE '%jamundi%'
+      AND LOWER(COALESCE(cd.ciudad, '')) NOT LIKE '%jamundí%'
+    GROUP BY equipo
+    """
+
+    # 2. CANCELADAS pendientes del mes — del último estado por NID en bubble
+    q_canceladas = f"""
+    WITH ultimo_registro AS (
+      SELECT nid, status, modified_date,
+        ROW_NUMBER() OVER (PARTITION BY nid ORDER BY modified_date DESC) AS rn
+      FROM `papyrus-master.bubble_gold.mart_bubble_schedule_co`
+      WHERE nid != 'nan' AND nid IS NOT NULL
+        AND visit_type = 'Habi Inmobiliaria'
+    )
+    SELECT
+      COALESCE(NULLIF(h.equipo_sellers, ''),
+               NULLIF(c.c_equipo_seller, ''),
+               'Sin equipo') AS equipo,
+      COUNT(*) AS total
+    FROM ultimo_registro v
+    LEFT JOIN `papyrus-data.habi_wh_inmobiliaria.consolidado_habi_inmobiliaria` c
+      ON v.nid = CAST(c.nid AS STRING)
+    LEFT JOIN `papyrus-master.squad_bi_global.hubspot_deal` h
+      ON SAFE_CAST(v.nid AS INT64) = h.nid AND h.pipeline = '803674753'
+    WHERE v.rn = 1
+      AND v.status IN ('Cancelado', 'No realizada', 'Cerrado')
+      AND v.modified_date >= '{primer_dia_mes}'
+      AND c.fecha_desistio_inmobiliaria IS NULL
+      AND c.v_fecha_venta IS NULL
+    GROUP BY equipo
+    """
+
+    # 3. JUZGADO — candidatos con concepto desfavorable
+    q_juzgado = """
+    WITH desfavorables AS (
+      SELECT * FROM (
+        SELECT
+          CAST(ct.nid AS STRING) AS nid,
+          ROW_NUMBER() OVER (
+            PARTITION BY ct.nid
+            ORDER BY ct.v_fecha_concepto_del_defensor_de_familia DESC
+          ) AS rn
+        FROM `papyrus-delivery-data.operaciones_global.control_tower_saneamiento_co_bi` ct
+        WHERE LOWER(ct.v_concepto_del_defensor_de_familia) = 'no favorable'
+          AND DATE(ct.v_fecha_concepto_del_defensor_de_familia)
+              >= DATE_SUB(CURRENT_DATE(), INTERVAL 6 MONTH)
+      ) WHERE rn = 1
+    )
+    SELECT
+      COALESCE(NULLIF(h.equipo_sellers, ''),
+               NULLIF(cd.c_equipo_seller, ''),
+               'Sin equipo') AS equipo,
+      COUNT(*) AS total
+    FROM desfavorables d
+    LEFT JOIN `papyrus-data.habi_wh_inmobiliaria.consolidado_habi_inmobiliaria` cd
+      ON CAST(cd.nid AS STRING) = d.nid
+    LEFT JOIN `papyrus-master.squad_bi_global.hubspot_deal` h
+      ON SAFE_CAST(d.nid AS INT64) = h.nid AND h.pipeline = '803674753'
+    GROUP BY equipo
+    """
+
+    resumen = {}
+    # por_agendar
+    for row in client.query(q_por_agendar).result():
+        eq = row.equipo or "Sin equipo"
+        resumen.setdefault(eq, {"por_agendar": 0, "por_agendar_2025": 0,
+                                "canceladas": 0, "juzgado": 0})
+        resumen[eq]["por_agendar"] = int(row.total or 0)
+        resumen[eq]["por_agendar_2025"] = int(row.de_2025_o_antes or 0)
+    # canceladas
+    for row in client.query(q_canceladas).result():
+        eq = row.equipo or "Sin equipo"
+        resumen.setdefault(eq, {"por_agendar": 0, "por_agendar_2025": 0,
+                                "canceladas": 0, "juzgado": 0})
+        resumen[eq]["canceladas"] = int(row.total or 0)
+    # juzgado
+    for row in client.query(q_juzgado).result():
+        eq = row.equipo or "Sin equipo"
+        resumen.setdefault(eq, {"por_agendar": 0, "por_agendar_2025": 0,
+                                "canceladas": 0, "juzgado": 0})
+        resumen[eq]["juzgado"] = int(row.total or 0)
+    return resumen
+
+
+@app.route("/api/notificar/lideres", methods=["POST"])
+def api_notificar_lideres():
+    """Envia un correo de resumen al lider de cada equipo con sus pendientes:
+       - Por agendar (total + cuantos son de 2025 o antes)
+       - Canceladas pendientes del mes
+       - Candidatos a juzgado
+    """
+    try:
+        PAGE_URL = "https://agenda-visitas-wcdm.onrender.com"
+        resumen_eq = _resumen_lideres_por_equipo()
+        out = {"enviados": 0, "errores": 0, "skipped": 0, "detalle": []}
+        for equipo, datos in sorted(resumen_eq.items()):
+            # saltar equipos sin nada accionable
+            total_acciones = (datos["por_agendar"] + datos["canceladas"]
+                              + datos["juzgado"])
+            if total_acciones == 0:
+                out["skipped"] += 1
+                continue
+
+            email_lider = (LIDERES_EQUIPO.get(equipo) or "").strip() \
+                          or LIDER_DEFAULT_EMAIL
+            asunto = f"Resumen Inmobiliaria — equipo {equipo}"
+            cuerpo = (
+                f"Hola lider de {equipo},\n\n"
+                f"Te compartimos el resumen de tu equipo. Por favor ayudanos a "
+                f"gestionar con tu equipo lo siguiente:\n\n"
+                f"  • Negocios POR AGENDAR: {datos['por_agendar']}\n"
+                f"      ↳ De estos, {datos['por_agendar_2025']} son del 2025 o "
+                f"antes — confirma URGENTE si se deben desistir o agendar.\n\n"
+                f"  • Canceladas POR REAGENDAR (este mes): {datos['canceladas']}\n\n"
+                f"  • Candidatos para JUZGADO (concepto desfavorable Defensor): "
+                f"{datos['juzgado']}\n\n"
+                f"Ingresa al portal para ver el detalle por NID:\n{PAGE_URL}\n\n"
+                f"Saludos,\nEquipo Habi Inmobiliaria"
+            )
+            item = {"equipo": equipo, "email": email_lider, **datos,
+                    "ok": False, "error": ""}
+            try:
+                _send_email(email_lider, asunto, cuerpo)
+                item["ok"] = True
+                out["enviados"] += 1
+            except Exception as e:
+                item["error"] = str(e)
+                out["errores"] += 1
+            out["detalle"].append(item)
+        return jsonify({"ok": True, **out})
     except Exception as e:
         import traceback
         traceback.print_exc()

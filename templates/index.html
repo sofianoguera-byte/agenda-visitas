@@ -168,11 +168,21 @@
             <div class="stat-card"><div class="icon total">&#x1f4e7;</div><div class="info"><h3 id="stat-fecha-reporte" style="font-size:14px;">-</h3><p>Fecha reporte correo</p></div></div>
         </div>
         <div class="container">
-            <div style="display:flex;justify-content:flex-end;margin-bottom:12px;">
-                <button id="btn-notificar-canceladas" class="btn"
+            <div style="display:flex;justify-content:flex-end;margin-bottom:12px;gap:8px;flex-wrap:wrap;">
+                <button class="btn"
                         style="background:#6c3baa;color:white;font-size:13px;padding:10px 16px;"
                         onclick="notificarCanceladasMailto()">
-                    📨 Notificar comerciales con canceladas
+                    📨 Notificar comerciales con canceladas pendientes
+                </button>
+                <button class="btn"
+                        style="background:#0ea5e9;color:white;font-size:13px;padding:10px 16px;"
+                        onclick="notificarTodasCanceladasMailto()">
+                    📨 Enviar a TODOS los comerciales con canceladas (incluso reagendadas)
+                </button>
+                <button class="btn"
+                        style="background:#16a34a;color:white;font-size:13px;padding:10px 16px;"
+                        onclick="notificarLideres()">
+                    📊 Notificar líderes con resumen del equipo
                 </button>
             </div>
             <div class="search-bar">
@@ -1122,6 +1132,66 @@
                         `&body=${encodeURIComponent(cuerpo)}`;
             window.location.href = url;
             showToast(`Abriendo Gmail con ${emails.length} comercial(es) en BCC`, 'success');
+        }
+
+        // Variante: TODAS las canceladas del periodo (no filtra pendientes).
+        // Sirve cuando no hubo canceladas ayer pero queremos pinchar a los
+        // comerciales para que reagenden las que aun tienen abiertas.
+        function notificarTodasCanceladasMailto() {
+            const todas = canceladas || [];
+            const emailsSet = new Set();
+            todas.forEach(c => {
+                const e = (c.comercial || '').trim();
+                if (e && e.includes('@')) emailsSet.add(e.toLowerCase());
+            });
+            const emails = Array.from(emailsSet);
+            if (emails.length === 0) {
+                showToast('No hay canceladas en el periodo', 'info');
+                return;
+            }
+            const asunto = `Visitas canceladas — revisar y reagendar (${todas.length})`;
+            const cuerpo =
+                `Hola,\n\n` +
+                `Hay visitas cancelas en el periodo que requieren tu revision. ` +
+                `Algunas pueden estar ya reagendadas, pero queremos que valides ` +
+                `el listado completo en el portal:\n\n` +
+                `${PAGE_URL}\n\n` +
+                `Total de cancelaciones del periodo en el equipo: ${todas.length}\n\n` +
+                `Por favor entra a la pestana "Canceladas por Reagendar" y ` +
+                `confirma el estado de cada NID.\n\n` +
+                `Saludos,\nEquipo Habi`;
+            const url = `mailto:?bcc=${encodeURIComponent(emails.join(','))}` +
+                        `&subject=${encodeURIComponent(asunto)}` +
+                        `&body=${encodeURIComponent(cuerpo)}`;
+            window.location.href = url;
+            showToast(`Abriendo Gmail con ${emails.length} comercial(es) en BCC`, 'success');
+        }
+
+        // Notifica a los lideres de cada equipo con resumen agregado.
+        // Llama al backend que envia los correos via SMTP usando la lista
+        // LIDERES_EQUIPO configurada en app.py.
+        async function notificarLideres() {
+            if (!confirm('Se enviara un correo a cada lider de equipo con el ' +
+                         'resumen (por agendar, canceladas, juzgado). ¿Continuar?')) {
+                return;
+            }
+            showToast('Enviando correos a lideres...', 'info');
+            try {
+                const r = await fetch('/api/notificar/lideres', { method: 'POST' });
+                const data = await r.json();
+                if (!data.ok) {
+                    showToast(`Error: ${data.error || 'desconocido'}`, 'error');
+                    return;
+                }
+                const det = (data.detalle || [])
+                    .map(d => `  • ${d.equipo} → ${d.email} ${d.ok ? '✅' : '❌ ' + (d.error || '')}`)
+                    .join('\n');
+                const msg = `Enviados: ${data.enviados} · Errores: ${data.errores} · ` +
+                            `Saltados (sin pendientes): ${data.skipped}\n\n${det}`;
+                alert(msg);
+            } catch (e) {
+                showToast(`Error: ${e.message}`, 'error');
+            }
         }
 
         // ==========================
