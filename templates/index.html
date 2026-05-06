@@ -310,7 +310,9 @@
                             <th style="padding:12px 16px;font-size:13px;">Comercial</th>
                             <th style="padding:12px 16px;font-size:13px;">Equipo</th>
                             <th style="padding:12px 16px;font-size:13px;">Ciudad</th>
+                            <th style="padding:12px 16px;font-size:13px;">Conjunto</th>
                             <th style="padding:12px 16px;font-size:13px;">Fecha Captación</th>
+                            <th style="padding:12px 16px;font-size:13px;">Fecha Levantamiento</th>
                             <th style="padding:12px 16px;font-size:13px;">Teléfono</th>
                             <th style="padding:12px 16px;font-size:13px;">Último Status</th>
                             <th style="padding:12px 16px;font-size:13px;">Estado Publicación</th>
@@ -513,6 +515,7 @@
 
         let statusMap = {};
         let cancelContactMap = {};
+        let cancelDesistidoMap = {};
         let canceladasManuales = [];
         let whatsappMap = {};
         let pubStatusMap = {};
@@ -526,6 +529,7 @@
                 statusMap = data.visita || {};
                 whatsappMap = data.whatsapp || {};
                 cancelContactMap = data.cancelContacto || {};
+                cancelDesistidoMap = data.cancelDesistido || {};
                 pubStatusMap = data.pubEstado || {};
                 pubCommentMap = data.pubComentario || {};
                 sfStatusMap = data.sfEstado || {};
@@ -872,12 +876,13 @@
                     if (dias === 365) canceladas365 = data;
                 }
 
-                canceladas = data.canceladas || [];
+                // Filtrar permanentemente los NIDs marcados como desistidos
+                canceladas = (data.canceladas || []).filter(c => !cancelDesistidoMap[c.nid]);
                 fechasReporte = data.fechas_reporte || [];
                 document.getElementById('loading-cancel').style.display = 'none';
                 const nidsExistentes = new Set(canceladas.map(c => c.nid));
                 canceladasManuales.forEach(cm => {
-                    if (!nidsExistentes.has(cm.nid)) canceladas.push(cm);
+                    if (!nidsExistentes.has(cm.nid) && !cancelDesistidoMap[cm.nid]) canceladas.push(cm);
                 });
                 canceladasLoaded = true;
                 if (canceladas.length === 0) {
@@ -917,6 +922,8 @@
             const cf = document.getElementById('filter-comercial-cancel').value;
             const cif = document.getElementById('filter-ciudad-cancel').value;
             const filtered = canceladas.filter(v => {
+                // Ocultar permanentemente los NIDs marcados como desistidos (visible para todos)
+                if (cancelDesistidoMap[v.nid]) return false;
                 const ms = !search || v.nid.toLowerCase().includes(search) || v.ciudad.toLowerCase().includes(search) || v.c_comercial_captacion.toLowerCase().includes(search);
                 return ms && (df === 'todos' || v.fecha_reporte === df) && (ef === 'todos' || v.equipo === ef) && (cf === 'todos' || v.c_comercial_captacion === cf) && (cif === 'todos' || v.ciudad === cif);
             });
@@ -1026,8 +1033,9 @@
                     })
                 });
             } catch (e) { console.error(e); }
-            cancelContactMap[nid] = 'desistido';
-            guardarEstadoCompartido(nid, 'cc:desistido');
+            // Estado permanente — oculto para todos los usuarios con acceso al link
+            cancelDesistidoMap[nid] = true;
+            guardarEstadoPermanente(nid, 'cd:1');
             canceladas = canceladas.filter(c => c.nid !== nid);
             cerrarModalDesistir();
             renderCanceladas();
@@ -1734,7 +1742,9 @@
                     <td style="padding:10px 16px;font-size:13px;">${v.comercial || 'N/A'}</td>
                     <td style="padding:10px 16px;font-size:13px;">${v.equipo || 'N/A'}</td>
                     <td style="padding:10px 16px;font-size:13px;">${v.ciudad || 'N/A'}</td>
+                    <td style="padding:10px 16px;font-size:13px;">${v.conjunto || ''}</td>
                     <td style="padding:10px 16px;font-size:13px;">${v.fecha_captacion || 'N/A'}</td>
+                    <td style="padding:10px 16px;font-size:13px;">${v.fecha_levantamiento || ''}</td>
                     <td style="padding:10px 16px;font-size:13px;">${v.telefono_cliente || 'Sin teléfono'}</td>
                     <td style="padding:10px 16px;font-size:13px;">${v.ultimo_status || 'Sin visita'}</td>
                     <td style="padding:10px 16px;"><span style="padding:4px 10px;border-radius:20px;font-size:11px;font-weight:700;${tagColor}">${tagText}</span></td>
@@ -1758,9 +1768,9 @@
 
         function descargarCSVAgendar() {
             const filtered = getFilteredAgendar();
-            const headers = ['NID','Comercial','Equipo','Ciudad','Fecha Captacion','Telefono','Ultimo Status','Estado Publicacion'];
+            const headers = ['NID','Comercial','Equipo','Ciudad','Conjunto','Fecha Captacion','Fecha Levantamiento','Telefono','Ultimo Status','Estado Publicacion'];
             const rows = filtered.map(v => {
-                return [v.nid, v.comercial, v.equipo, v.ciudad, v.fecha_captacion, v.telefono_cliente, v.ultimo_status, v.tipo_fotos].map(c => '"' + (c || '').replace(/"/g, '""') + '"').join(',');
+                return [v.nid, v.comercial, v.equipo, v.ciudad, v.conjunto, v.fecha_captacion, v.fecha_levantamiento, v.telefono_cliente, v.ultimo_status, v.tipo_fotos].map(c => '"' + (c || '').replace(/"/g, '""') + '"').join(',');
             });
             const csv = [headers.join(','), ...rows].join('\n');
             const blob = new Blob(['\ufeff' + csv], {type: 'text/csv;charset=utf-8;'});

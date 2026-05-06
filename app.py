@@ -1328,13 +1328,39 @@ def api_por_agendar():
       SELECT nid, ANY_VALUE(gravamenes_del_apartamento) AS gravamen
       FROM `papyrus-data.habi_wh_inmobiliaria.habiinmobiliaria_sellers_gestion`
       GROUP BY nid
+    ),
+    conjunto_nid AS (
+      SELECT
+        CAST(nid_1 AS STRING) AS nid,
+        ANY_VALUE(nombre_de_edificio_conjunto) AS conjunto
+      FROM `papyrus-data.habi_wh_inmobiliaria.pipefy_sellers`
+      WHERE nid_1 IS NOT NULL
+        AND nombre_de_edificio_conjunto IS NOT NULL
+        AND nombre_de_edificio_conjunto != ''
+      GROUP BY nid
+    ),
+    fecha_levantamiento AS (
+      -- Fecha en que el patrimonio fue levantado (primera vez que el NID
+      -- entra a fase final de los pipes de patrimonio).
+      SELECT
+        CAST(nid AS STRING) AS nid,
+        MIN(DATE(first_time_in_phase)) AS fecha_levant
+      FROM `papyrus-master.pipefy_streamhabi_tramite.pipefy_history_global`
+      WHERE pipe_id IN ('302291650', '303248825', '306710579', '306725945')
+        AND phase_name IN ('Finalizados Inmobiliaria', 'Finalizadas',
+                           'Sentencia Ejecutoriada')
+        AND nid IS NOT NULL
+      GROUP BY nid
     )
     SELECT
       cd.nid,
       COALESCE(h.hubspot_owner_id, cd.c_comercial_captacion) AS c_comercial_captacion,
       COALESCE(h.equipo_sellers, cd.c_equipo_seller) AS c_equipo_seller,
       cd.ciudad,
+      cn.conjunto AS conjunto,
       DATE(cd.c_fecha_captacion) AS fecha_captacion,
+      -- Solo mostrar fecha de levantamiento si el estado actual es 'Patrimonio levantado'
+      IF(d.estado_patrimonio = 'Patrimonio levantado', fl.fecha_levant, NULL) AS fecha_levantamiento,
       cd.tel_fono_del_cliente_1 AS telefono_cliente,
       b.status AS ultimo_status,
       d.date_publication,
@@ -1347,6 +1373,8 @@ def api_por_agendar():
       ON SAFE_CAST(cd.nid AS INT64) = h.nid AND h.pipeline = '803674753'
     LEFT JOIN tiene_fotos_cliente fc ON cd.nid = fc.nid
     LEFT JOIN gravamen_sellers gs ON cd.nid = gs.nid
+    LEFT JOIN conjunto_nid cn ON CAST(cd.nid AS STRING) = cn.nid
+    LEFT JOIN fecha_levantamiento fl ON CAST(cd.nid AS STRING) = fl.nid
     WHERE cd.c_fecha_captacion IS NOT NULL
       AND cd.fecha_desistio_inmobiliaria IS NULL
       AND h.fecha_desistio_inmobiliaria IS NULL
@@ -1393,8 +1421,10 @@ def api_por_agendar():
                 "nid": nid,
                 "comercial": row.c_comercial_captacion or "",
                 "ciudad": (row.ciudad or "").title(),
+                "conjunto": row.conjunto or "",
                 "equipo": row.c_equipo_seller or "",
                 "fecha_captacion": str(row.fecha_captacion) if row.fecha_captacion else "",
+                "fecha_levantamiento": str(row.fecha_levantamiento) if row.fecha_levantamiento else "",
                 "telefono_cliente": str(row.telefono_cliente) if row.telefono_cliente else "",
                 "ultimo_status": row.ultimo_status or "Sin visita",
                 "tipo_fotos": row.tipo_fotos or "",
@@ -1872,6 +1902,7 @@ def obtener_estados():
     fc_estado = {}
     fc_comentario = {}
     juzgado_estado = {}  # contactado / interesado / no_interesado
+    cancel_desistido = {}  # NIDs desistidos permanentemente — ocultos para todos
 
     for row in leer_sheet_estados():
         nid = row["nid"]
@@ -1886,10 +1917,13 @@ def obtener_estados():
                 whatsapp[nid] = True
             elif estado.startswith("cc:"):
                 cancel_contacto[nid] = estado[3:]
-            elif not estado.startswith(("ps:", "pc:", "sf:", "sc:", "jz:", "fc:", "fd:")):
+                # Compatibilidad con desistidos antiguos (guardados como 'cc:desistido' diario)
+                if estado[3:] == "desistido":
+                    cancel_desistido[nid] = True
+            elif not estado.startswith(("ps:", "pc:", "sf:", "sc:", "jz:", "fc:", "fd:", "cd:")):
                 visita_estados[nid] = estado
 
-        # Estados permanentes (publicar, sin fotos, juzgado)
+        # Estados permanentes (publicar, sin fotos, juzgado, cancel desistido)
         if f == "perm":
             if estado.startswith("ps:") and estado[3:]:
                 pub_estado[nid] = estado[3:]
@@ -1905,11 +1939,14 @@ def obtener_estados():
                 fc_comentario[nid] = estado[3:]
             elif estado.startswith("jz:") and estado[3:]:
                 juzgado_estado[nid] = estado[3:]
+            elif estado.startswith("cd:") and estado[3:]:
+                cancel_desistido[nid] = True
 
     return jsonify({
         "visita": visita_estados,
         "whatsapp": whatsapp,
         "cancelContacto": cancel_contacto,
+        "cancelDesistido": cancel_desistido,
         "pubEstado": pub_estado,
         "pubComentario": pub_comentario,
         "sfEstado": sf_estado,
