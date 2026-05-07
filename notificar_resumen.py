@@ -112,7 +112,7 @@ def resumen_por_comercial():
       AND cd.fecha_desistio_inmobiliaria IS NULL
       AND h.fecha_desistio_inmobiliaria IS NULL
       AND cd.v_fecha_venta IS NULL
-      AND dealstage != '1182117639'
+      AND (h.dealstage IS NULL OR h.dealstage != '1182117639')
       AND (cd.date_publication IS NULL
            OR (fc.nid IS NOT NULL AND DATE(cd.date_publication) >= DATE '2026-04-13'))
       AND CAST(cd.nid AS STRING) NOT IN (SELECT nid FROM nids_con_finalizado)

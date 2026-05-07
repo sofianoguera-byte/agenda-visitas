@@ -795,7 +795,7 @@ def _resumen_lideres_por_equipo():
       AND cd.fecha_desistio_inmobiliaria IS NULL
       AND h.fecha_desistio_inmobiliaria IS NULL
       AND cd.v_fecha_venta IS NULL
-      AND dealstage != '1182117639'
+      AND (h.dealstage IS NULL OR h.dealstage != '1182117639')
       AND (cd.date_publication IS NULL
            OR (fc.nid IS NOT NULL AND DATE(cd.date_publication) >= DATE '2026-04-13'))
       AND CAST(cd.nid AS STRING) NOT IN (SELECT nid FROM nids_con_finalizado)
@@ -941,7 +941,7 @@ def _resumen_por_comercial():
       AND cd.fecha_desistio_inmobiliaria IS NULL
       AND h.fecha_desistio_inmobiliaria IS NULL
       AND cd.v_fecha_venta IS NULL
-      AND dealstage != '1182117639'
+      AND (h.dealstage IS NULL OR h.dealstage != '1182117639')
       AND (cd.date_publication IS NULL
            OR (fc.nid IS NOT NULL AND DATE(cd.date_publication) >= DATE '2026-04-13'))
       AND CAST(cd.nid AS STRING) NOT IN (SELECT nid FROM nids_con_finalizado)
@@ -1379,7 +1379,7 @@ def api_por_agendar():
       AND cd.fecha_desistio_inmobiliaria IS NULL
       AND h.fecha_desistio_inmobiliaria IS NULL
       AND cd.v_fecha_venta IS NULL
-      AND dealstage != '1182117639'
+      AND (h.dealstage IS NULL OR h.dealstage != '1182117639')
       -- Publicacion (fuente: consolidado_habi_inmobiliaria.date_publication):
       --  * sin publicar => incluir
       --  * publicado >= 2026-04-13 con fotos de cliente (source_image_id = 3) => incluir
@@ -1479,7 +1479,7 @@ def api_por_publicar():
       LEFT JOIN tiene_fotos_360 f360 ON cd.nid = f360.nid
       WHERE cd.fecha_desistio_inmobiliaria IS NULL
         AND h.fecha_desistio_inmobiliaria IS NULL
-        AND dealstage != '1182117639'
+        AND (h.dealstage IS NULL OR h.dealstage != '1182117639')
         AND cd.c_fecha_captacion IS NOT NULL
         AND d.estado_patrimonio = 'Sin patrimonio'
         AND b.status = 'Finalizado'
@@ -1752,7 +1752,7 @@ def api_por_publicar_sin_fotos():
       AND h.fecha_desistio_inmobiliaria IS NULL
       AND cd.date_publication IS NULL
       AND cd.v_fecha_venta IS NULL
-      AND dealstage != '1182117639'
+      AND (h.dealstage IS NULL OR h.dealstage != '1182117639')
       AND f360.nid IS NULL
       AND (b.nid IS NULL OR b.status != 'Finalizado')
       AND nph.nid IS NULL  -- excluir NPH
