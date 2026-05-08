@@ -543,10 +543,20 @@ def api_juzgado():
     -- NIDs ya en gestion para juzgado (salieron de Onhold/Asignacion en pipe pre-juzgado
     -- 306710579, o estan en cualquier fase del pipe juzgado activo 306725945).
     ya_gestionados AS (
-      SELECT DISTINCT CAST(nid AS STRING) AS nid
-      FROM `papyrus-master.pipefy_streamhabi_tramite.pipefy_history_global`
-      WHERE (pipe_id = '306710579' AND phase_name NOT IN ('Onhold', 'Asignación'))
-         OR pipe_id = '306725945'
+      -- NIDs cuya ULTIMA fase en pipefy esta activa (no Onhold/cerrado).
+      -- Excluye solo los que se estan moviendo HOY: si desistieron o finalizaron,
+      -- vuelven a aparecer como candidatos.
+      SELECT nid FROM (
+        SELECT
+          CAST(nid AS STRING) AS nid,
+          phase_name AS fase,
+          ROW_NUMBER() OVER (PARTITION BY nid ORDER BY first_time_in_phase DESC) AS rn
+        FROM `papyrus-master.pipefy_streamhabi_tramite.pipefy_history_global`
+        WHERE pipe_id IN ('306710579', '306725945')
+      )
+      WHERE rn = 1
+        AND fase NOT IN ('Onhold', 'Asignación', 'Desistido', 'Desistidos',
+                         'Finalizadas', 'Finalizado Alianza (Silencio Adm)')
     ),
     -- control_tower trae el concepto del defensor + nombres y telefono en plano
     desfavorables AS (
@@ -851,10 +861,18 @@ def _resumen_lideres_por_equipo():
     # 3. JUZGADO — candidatos con concepto desfavorable, sin contar los ya gestionados
     q_juzgado = """
     WITH ya_gestionados AS (
-      SELECT DISTINCT CAST(nid AS STRING) AS nid
-      FROM `papyrus-master.pipefy_streamhabi_tramite.pipefy_history_global`
-      WHERE (pipe_id = '306710579' AND phase_name NOT IN ('Onhold', 'Asignación'))
-         OR pipe_id = '306725945'
+      -- NIDs cuya ULTIMA fase en pipefy esta activa (no Onhold/cerrado).
+      SELECT nid FROM (
+        SELECT
+          CAST(nid AS STRING) AS nid,
+          phase_name AS fase,
+          ROW_NUMBER() OVER (PARTITION BY nid ORDER BY first_time_in_phase DESC) AS rn
+        FROM `papyrus-master.pipefy_streamhabi_tramite.pipefy_history_global`
+        WHERE pipe_id IN ('306710579', '306725945')
+      )
+      WHERE rn = 1
+        AND fase NOT IN ('Onhold', 'Asignación', 'Desistido', 'Desistidos',
+                         'Finalizadas', 'Finalizado Alianza (Silencio Adm)')
     ),
     desfavorables AS (
       SELECT * FROM (
@@ -1004,10 +1022,18 @@ def _resumen_por_comercial():
 
     q_juzgado = """
     WITH ya_gestionados AS (
-      SELECT DISTINCT CAST(nid AS STRING) AS nid
-      FROM `papyrus-master.pipefy_streamhabi_tramite.pipefy_history_global`
-      WHERE (pipe_id = '306710579' AND phase_name NOT IN ('Onhold', 'Asignación'))
-         OR pipe_id = '306725945'
+      -- NIDs cuya ULTIMA fase en pipefy esta activa (no Onhold/cerrado).
+      SELECT nid FROM (
+        SELECT
+          CAST(nid AS STRING) AS nid,
+          phase_name AS fase,
+          ROW_NUMBER() OVER (PARTITION BY nid ORDER BY first_time_in_phase DESC) AS rn
+        FROM `papyrus-master.pipefy_streamhabi_tramite.pipefy_history_global`
+        WHERE pipe_id IN ('306710579', '306725945')
+      )
+      WHERE rn = 1
+        AND fase NOT IN ('Onhold', 'Asignación', 'Desistido', 'Desistidos',
+                         'Finalizadas', 'Finalizado Alianza (Silencio Adm)')
     ),
     desfavorables AS (
       SELECT * FROM (

@@ -157,10 +157,18 @@ def resumen_por_comercial():
 
     q_juzgado = """
     WITH ya_gestionados AS (
-      SELECT DISTINCT CAST(nid AS STRING) AS nid
-      FROM `papyrus-master.pipefy_streamhabi_tramite.pipefy_history_global`
-      WHERE (pipe_id = '306710579' AND phase_name NOT IN ('Onhold', 'Asignación'))
-         OR pipe_id = '306725945'
+      -- NIDs cuya ULTIMA fase en pipefy esta activa (no Onhold/cerrado).
+      SELECT nid FROM (
+        SELECT
+          CAST(nid AS STRING) AS nid,
+          phase_name AS fase,
+          ROW_NUMBER() OVER (PARTITION BY nid ORDER BY first_time_in_phase DESC) AS rn
+        FROM `papyrus-master.pipefy_streamhabi_tramite.pipefy_history_global`
+        WHERE pipe_id IN ('306710579', '306725945')
+      )
+      WHERE rn = 1
+        AND fase NOT IN ('Onhold', 'Asignación', 'Desistido', 'Desistidos',
+                         'Finalizadas', 'Finalizado Alianza (Silencio Adm)')
     ),
     desfavorables AS (
       SELECT * FROM (
