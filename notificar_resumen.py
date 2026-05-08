@@ -156,7 +156,13 @@ def resumen_por_comercial():
     """
 
     q_juzgado = """
-    WITH desfavorables AS (
+    WITH ya_gestionados AS (
+      SELECT DISTINCT CAST(nid AS STRING) AS nid
+      FROM `papyrus-master.pipefy_streamhabi_tramite.pipefy_history_global`
+      WHERE (pipe_id = '306710579' AND phase_name NOT IN ('Onhold', 'Asignación'))
+         OR pipe_id = '306725945'
+    ),
+    desfavorables AS (
       SELECT * FROM (
         SELECT
           CAST(ct.nid AS STRING) AS nid,
@@ -175,10 +181,12 @@ def resumen_por_comercial():
                           NULLIF(cd.c_comercial_captacion, '')))) AS comercial,
       COUNT(*) AS total
     FROM desfavorables d
+    LEFT JOIN ya_gestionados yg ON yg.nid = d.nid
     LEFT JOIN `papyrus-data.habi_wh_inmobiliaria.consolidado_habi_inmobiliaria` cd
       ON CAST(cd.nid AS STRING) = d.nid
     LEFT JOIN `papyrus-master.squad_bi_global.hubspot_deal` h
       ON SAFE_CAST(d.nid AS INT64) = h.nid AND h.pipeline = '803674753'
+    WHERE yg.nid IS NULL
     GROUP BY comercial
     HAVING comercial IS NOT NULL AND comercial != ''
     """
