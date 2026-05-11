@@ -1470,14 +1470,9 @@ def api_por_agendar():
           AND COALESCE(epa.flag, '') != 'En proceso'
         )
       )
-      -- Fallback por gravamen del seller cuando no hay info en control_tower.
-      AND (
-        epa.flag IS NOT NULL
-        OR gs.gravamen IS NULL
-        OR LOWER(gs.gravamen) NOT LIKE '%patrimonio%'
-        OR LOWER(gs.gravamen) LIKE '%mayores%'
-        OR LOWER(gs.gravamen) LIKE '%sin hijos%'
-      )
+      -- Sin filtro adicional por gravamen: la regla del contrato manda.
+      -- Si firmaron sin el contrato de patrimonio de familia, asumimos hijos mayores
+      -- (independiente del gravamen reportado por el seller, que no distingue edad).
       AND LOWER(COALESCE(cd.ciudad, '')) NOT LIKE '%jamundi%'
       AND LOWER(COALESCE(cd.ciudad, '')) NOT LIKE '%jamundí%'
     ORDER BY cd.c_fecha_captacion DESC
@@ -1671,14 +1666,7 @@ def api_por_publicar():
                   AND COALESCE(epa.flag, '') != 'En proceso'
                 )
               )
-              -- Fallback por gravamen.
-              AND (
-                epa.flag IS NOT NULL
-                OR gs.gravamen IS NULL
-                OR LOWER(gs.gravamen) NOT LIKE '%patrimonio%'
-                OR LOWER(gs.gravamen) LIKE '%mayores%'
-                OR LOWER(gs.gravamen) LIKE '%sin hijos%'
-              )
+              -- Sin filtro adicional por gravamen (regla del contrato gobierna).
             """
             try:
                 for row in client.query(q_extra).result():
@@ -1833,14 +1821,7 @@ def api_por_publicar_fotos_correo():
           AND COALESCE(epa.flag, '') != 'En proceso'
         )
       )
-      -- Fallback por gravamen.
-      AND (
-        epa.flag IS NOT NULL
-        OR gs.gravamen IS NULL
-        OR LOWER(gs.gravamen) NOT LIKE '%patrimonio%'
-        OR LOWER(gs.gravamen) LIKE '%mayores%'
-        OR LOWER(gs.gravamen) LIKE '%sin hijos%'
-      )
+      -- Sin filtro adicional por gravamen (regla del contrato gobierna).
     """
     try:
         results = client.query(query).result()
@@ -1941,14 +1922,9 @@ def api_por_publicar_sin_fotos():
           AND COALESCE(epa.flag, '') != 'En proceso'
         )
       )
-      -- Fallback por gravamen del seller cuando no hay info en control_tower.
-      AND (
-        epa.flag IS NOT NULL
-        OR gs.gravamen IS NULL
-        OR LOWER(gs.gravamen) NOT LIKE '%patrimonio%'
-        OR LOWER(gs.gravamen) LIKE '%mayores%'
-        OR LOWER(gs.gravamen) LIKE '%sin hijos%'
-      )
+      -- Sin filtro adicional por gravamen: la regla del contrato manda.
+      -- Si firmaron sin el contrato de patrimonio de familia, asumimos hijos mayores
+      -- (independiente del gravamen reportado por el seller, que no distingue edad).
     ORDER BY cd.c_fecha_captacion DESC
     """
     try:
