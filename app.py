@@ -1449,13 +1449,24 @@ def api_por_agendar():
       AND (
         -- Caso A: tabla oficial de estado_patrimonio marca que no hay patrimonio activo
         d.estado_patrimonio IN ('Sin patrimonio', 'Patrimonio levantado')
-        -- Caso B: sin registro en esa tabla, usamos gravamenes_del_apartamento como fallback
+        -- Caso B: sin registro en esa tabla, usamos gravamenes_del_apartamento como fallback.
+        -- Excluye CUALQUIER gravamen que mencione patrimonio, salvo el de
+        -- hijos mayores (que no requiere autorizacion de juzgado).
         OR (
           d.estado_patrimonio IS NULL
-          AND (gs.gravamen IS NULL
-               OR gs.gravamen NOT IN ('Hipoteca + Patrimonio con hijos', 'Patrimonio hijos'))
+          AND (
+            gs.gravamen IS NULL
+            OR (
+              LOWER(gs.gravamen) NOT LIKE '%patrimonio%'
+              OR LOWER(gs.gravamen) LIKE '%mayores%'
+              OR LOWER(gs.gravamen) LIKE '%sin hijos%'
+            )
+          )
         )
       )
+      -- Excluye los que firmaron el contrato de corretaje con patrimonio de familia:
+      -- esos los gestiona el equipo de levantamiento de Habi, no requieren accion del comercial.
+      AND COALESCE(cd.c_tipo_contrato_firmado, '') != 'Contrato de Corretaje con patrimonio de familia'
       AND LOWER(COALESCE(cd.ciudad, '')) NOT LIKE '%jamundi%'
       AND LOWER(COALESCE(cd.ciudad, '')) NOT LIKE '%jamundí%'
     ORDER BY cd.c_fecha_captacion DESC
