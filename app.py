@@ -1597,13 +1597,33 @@ def api_por_publicar():
                 ON pc3.id = pi3.property_card_id
               WHERE pi3.source_image_id = 1
             ) fp ON cd.nid = fp.nid
+            LEFT JOIN (
+              SELECT nid, ANY_VALUE(gravamenes_del_apartamento) AS gravamen
+              FROM `papyrus-data.habi_wh_inmobiliaria.habiinmobiliaria_sellers_gestion`
+              GROUP BY nid
+            ) gs ON cd.nid = gs.nid
             WHERE CAST(cd.nid AS STRING) IN ({nids_str})
               AND cd.fecha_desistio_inmobiliaria IS NULL
-              AND (d.estado_patrimonio IS NULL OR d.estado_patrimonio = 'Sin patrimonio')
               AND (d.date_publication IS NULL OR fc.nid IS NOT NULL)
               AND (cd.date_publication IS NULL OR fc.nid IS NOT NULL)
               AND cd.v_fecha_venta IS NULL
               AND fp.nid IS NULL
+              -- Excluye patrimonio de familia con hijos menores activo o desistido.
+              AND (
+                d.estado_patrimonio IN ('Sin patrimonio', 'Patrimonio levantado')
+                OR (
+                  d.estado_patrimonio IS NULL
+                  AND (
+                    gs.gravamen IS NULL
+                    OR (
+                      LOWER(gs.gravamen) NOT LIKE '%patrimonio%'
+                      OR LOWER(gs.gravamen) LIKE '%mayores%'
+                      OR LOWER(gs.gravamen) LIKE '%sin hijos%'
+                    )
+                  )
+                )
+              )
+              AND COALESCE(cd.c_tipo_contrato_firmado, '') != 'Contrato de Corretaje con patrimonio de familia'
             """
             try:
                 for row in client.query(q_extra).result():
@@ -1711,6 +1731,11 @@ def api_por_publicar_fotos_correo():
       INNER JOIN `papyrus-data.habi_brokers_listing.property_image` pi
         ON pc.id = pi.property_card_id
       WHERE pi.source_image_id = 1
+    ),
+    gravamen_sellers AS (
+      SELECT nid, ANY_VALUE(gravamenes_del_apartamento) AS gravamen
+      FROM `papyrus-data.habi_wh_inmobiliaria.habiinmobiliaria_sellers_gestion`
+      GROUP BY nid
     )
     SELECT
       CAST(cd.nid AS STRING) AS nid,
@@ -1726,12 +1751,28 @@ def api_por_publicar_fotos_correo():
       ON SAFE_CAST(cd.nid AS INT64) = h.nid AND h.pipeline = '803674753'
     LEFT JOIN tiene_fotos_cliente fc ON cd.nid = fc.nid
     LEFT JOIN tiene_fotos_360 f360 ON cd.nid = f360.nid
+    LEFT JOIN gravamen_sellers gs ON cd.nid = gs.nid
     WHERE CAST(cd.nid AS STRING) IN ({nids_str})
       AND cd.fecha_desistio_inmobiliaria IS NULL
       AND f360.nid IS NULL
-      AND (d.estado_patrimonio IS NULL OR d.estado_patrimonio = 'Sin patrimonio')
       AND (cd.date_publication IS NULL OR fc.nid IS NOT NULL)
       AND (d.date_publication IS NULL OR fc.nid IS NOT NULL)
+      -- Excluye patrimonio de familia con hijos menores activo o desistido.
+      AND (
+        d.estado_patrimonio IN ('Sin patrimonio', 'Patrimonio levantado')
+        OR (
+          d.estado_patrimonio IS NULL
+          AND (
+            gs.gravamen IS NULL
+            OR (
+              LOWER(gs.gravamen) NOT LIKE '%patrimonio%'
+              OR LOWER(gs.gravamen) LIKE '%mayores%'
+              OR LOWER(gs.gravamen) LIKE '%sin hijos%'
+            )
+          )
+        )
+      )
+      AND COALESCE(cd.c_tipo_contrato_firmado, '') != 'Contrato de Corretaje con patrimonio de familia'
     """
     try:
         results = client.query(query).result()
@@ -1809,13 +1850,21 @@ def api_por_publicar_sin_fotos():
       AND (b.nid IS NULL OR b.status != 'Finalizado')
       AND nph.nid IS NULL  -- excluir NPH
       -- Excluye patrimonio de familia con hijos menores activo.
-      -- Si ya se levanto (estado_patrimonio = 'Patrimonio levantado') o nunca hubo, pasa.
+      -- Solo pasa si: ya se levanto, nunca hubo, o el patrimonio es explicitamente
+      -- de hijos mayores (no requiere autorizacion de juzgado).
+      -- 'Patrimonio desistido' NO pasa (no se levanto, se cayo el tramite).
       AND (
         d.estado_patrimonio IN ('Sin patrimonio', 'Patrimonio levantado')
         OR (
           d.estado_patrimonio IS NULL
-          AND (gs.gravamen IS NULL
-               OR gs.gravamen NOT IN ('Hipoteca + Patrimonio con hijos', 'Patrimonio hijos'))
+          AND (
+            gs.gravamen IS NULL
+            OR (
+              LOWER(gs.gravamen) NOT LIKE '%patrimonio%'
+              OR LOWER(gs.gravamen) LIKE '%mayores%'
+              OR LOWER(gs.gravamen) LIKE '%sin hijos%'
+            )
+          )
         )
       )
       -- Excluye los que firmaron el contrato de corretaje con patrimonio de familia:
