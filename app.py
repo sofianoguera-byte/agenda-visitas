@@ -1385,7 +1385,13 @@ def api_por_agendar():
       -- NIDs con patrimonio en proceso o desistido en el lado vendedor.
       SELECT DISTINCT CAST(nid AS STRING) AS nid
       FROM `papyrus-delivery-data.operaciones_global.control_tower_saneamiento_co_bi`
-      WHERE v_flag_desistidos_patrimonio IN ('En proceso', 'Desistidos')
+      -- Solo bloquear si el levantamiento sigue EN PROCESO.
+      -- Los 'Desistidos' en control_tower se manejan aparte:
+      --   * Si el contrato firmado fue 'Contrato de Corretaje con patrimonio de familia',
+      --     ya se excluye por el filtro de tipo de contrato.
+      --   * Si el contrato fue normal/exclusividad, el desistimiento del tramite indica
+      --     que no era necesario levantar (probable hijos mayores) -> SI publicar.
+      WHERE v_flag_desistidos_patrimonio = 'En proceso'
     ),
     conjunto_nid AS (
       SELECT
@@ -1537,7 +1543,13 @@ def api_por_publicar():
       -- Si aparecen aqui NO deben mostrarse para publicar.
       SELECT DISTINCT CAST(nid AS STRING) AS nid
       FROM `papyrus-delivery-data.operaciones_global.control_tower_saneamiento_co_bi`
-      WHERE v_flag_desistidos_patrimonio IN ('En proceso', 'Desistidos')
+      -- Solo bloquear si el levantamiento sigue EN PROCESO.
+      -- Los 'Desistidos' en control_tower se manejan aparte:
+      --   * Si el contrato firmado fue 'Contrato de Corretaje con patrimonio de familia',
+      --     ya se excluye por el filtro de tipo de contrato.
+      --   * Si el contrato fue normal/exclusividad, el desistimiento del tramite indica
+      --     que no era necesario levantar (probable hijos mayores) -> SI publicar.
+      WHERE v_flag_desistidos_patrimonio = 'En proceso'
     ),
     base AS (
       SELECT cd.nid, COALESCE(h.hubspot_owner_id, cd.c_comercial_captacion) AS c_comercial_captacion, cd.ciudad, COALESCE(h.equipo_sellers, cd.c_equipo_seller) AS c_equipo_seller,
@@ -1638,7 +1650,13 @@ def api_por_publicar():
             LEFT JOIN (
               SELECT DISTINCT CAST(nid AS STRING) AS nid
               FROM `papyrus-delivery-data.operaciones_global.control_tower_saneamiento_co_bi`
-              WHERE v_flag_desistidos_patrimonio IN ('En proceso', 'Desistidos')
+              -- Solo bloquear si el levantamiento sigue EN PROCESO.
+      -- Los 'Desistidos' en control_tower se manejan aparte:
+      --   * Si el contrato firmado fue 'Contrato de Corretaje con patrimonio de familia',
+      --     ya se excluye por el filtro de tipo de contrato.
+      --   * Si el contrato fue normal/exclusividad, el desistimiento del tramite indica
+      --     que no era necesario levantar (probable hijos mayores) -> SI publicar.
+      WHERE v_flag_desistidos_patrimonio = 'En proceso'
             ) pnl ON CAST(cd.nid AS STRING) = pnl.nid
             WHERE CAST(cd.nid AS STRING) IN ({nids_str})
               AND cd.fecha_desistio_inmobiliaria IS NULL
@@ -1780,7 +1798,13 @@ def api_por_publicar_fotos_correo():
     patrimonio_no_levantado AS (
       SELECT DISTINCT CAST(nid AS STRING) AS nid
       FROM `papyrus-delivery-data.operaciones_global.control_tower_saneamiento_co_bi`
-      WHERE v_flag_desistidos_patrimonio IN ('En proceso', 'Desistidos')
+      -- Solo bloquear si el levantamiento sigue EN PROCESO.
+      -- Los 'Desistidos' en control_tower se manejan aparte:
+      --   * Si el contrato firmado fue 'Contrato de Corretaje con patrimonio de familia',
+      --     ya se excluye por el filtro de tipo de contrato.
+      --   * Si el contrato fue normal/exclusividad, el desistimiento del tramite indica
+      --     que no era necesario levantar (probable hijos mayores) -> SI publicar.
+      WHERE v_flag_desistidos_patrimonio = 'En proceso'
     )
     SELECT
       CAST(cd.nid AS STRING) AS nid,
@@ -1867,7 +1891,13 @@ def api_por_publicar_sin_fotos():
       -- NIDs con patrimonio en proceso o desistido en el lado vendedor.
       SELECT DISTINCT CAST(nid AS STRING) AS nid
       FROM `papyrus-delivery-data.operaciones_global.control_tower_saneamiento_co_bi`
-      WHERE v_flag_desistidos_patrimonio IN ('En proceso', 'Desistidos')
+      -- Solo bloquear si el levantamiento sigue EN PROCESO.
+      -- Los 'Desistidos' en control_tower se manejan aparte:
+      --   * Si el contrato firmado fue 'Contrato de Corretaje con patrimonio de familia',
+      --     ya se excluye por el filtro de tipo de contrato.
+      --   * Si el contrato fue normal/exclusividad, el desistimiento del tramite indica
+      --     que no era necesario levantar (probable hijos mayores) -> SI publicar.
+      WHERE v_flag_desistidos_patrimonio = 'En proceso'
     ),
     -- NIDs marcados como NPH (Nuevo Proyecto Habitacional) en HubSpot.
     -- Estos los gestiona el equipo NPH, no aparecen en este tab.
