@@ -1381,17 +1381,19 @@ def api_por_agendar():
       FROM `papyrus-data.habi_wh_inmobiliaria.habiinmobiliaria_sellers_gestion`
       GROUP BY nid
     ),
-    patrimonio_no_levantado AS (
-      -- NIDs con patrimonio en proceso o desistido en el lado vendedor.
-      SELECT DISTINCT CAST(nid AS STRING) AS nid
-      FROM `papyrus-delivery-data.operaciones_global.control_tower_saneamiento_co_bi`
-      -- Solo bloquear si el levantamiento sigue EN PROCESO.
-      -- Los 'Desistidos' en control_tower se manejan aparte:
-      --   * Si el contrato firmado fue 'Contrato de Corretaje con patrimonio de familia',
-      --     ya se excluye por el filtro de tipo de contrato.
-      --   * Si el contrato fue normal/exclusividad, el desistimiento del tramite indica
-      --     que no era necesario levantar (probable hijos mayores) -> SI publicar.
-      WHERE v_flag_desistidos_patrimonio = 'En proceso'
+    estado_patrimonio_actual AS (
+      -- Ultimo flag de patrimonio por NID (no filtramos por flag, asi capturamos
+      -- el estado mas reciente). Si un NID se desistio y luego se re-finalizo,
+      -- aqui obtenemos el 'Finalizados' mas reciente, no el 'Desistidos' viejo.
+      SELECT CAST(nid AS STRING) AS nid, v_flag_desistidos_patrimonio AS flag
+      FROM (
+        SELECT nid, v_flag_desistidos_patrimonio,
+          ROW_NUMBER() OVER (
+            PARTITION BY nid
+            ORDER BY v_fecha_inicio_fase_actual_patrimonio_de_familia DESC
+          ) AS rn
+        FROM `papyrus-delivery-data.operaciones_global.control_tower_saneamiento_co_bi`
+      ) WHERE rn = 1
     ),
     conjunto_nid AS (
       SELECT
@@ -1437,7 +1439,7 @@ def api_por_agendar():
       ON SAFE_CAST(cd.nid AS INT64) = h.nid AND h.pipeline = '803674753'
     LEFT JOIN tiene_fotos_cliente fc ON cd.nid = fc.nid
     LEFT JOIN gravamen_sellers gs ON cd.nid = gs.nid
-    LEFT JOIN patrimonio_no_levantado pnl ON pnl.nid = CAST(cd.nid AS STRING)
+    LEFT JOIN estado_patrimonio_actual epa ON epa.nid = CAST(cd.nid AS STRING)
     LEFT JOIN conjunto_nid cn ON CAST(cd.nid AS STRING) = cn.nid
     LEFT JOIN fecha_levantamiento fl ON CAST(cd.nid AS STRING) = fl.nid
     WHERE cd.c_fecha_captacion IS NOT NULL
@@ -1457,31 +1459,25 @@ def api_por_agendar():
       )
       AND CAST(cd.nid AS STRING) NOT IN (SELECT nid FROM nids_con_finalizado)
       AND (b.nid IS NULL OR b.status NOT IN ('Agendado', 'Cerrado'))
-      -- El unico bloqueante es patrimonio de familia con hijos menores.
-      -- Hipoteca, afectacion familiar sin menores, etc. NO bloquean.
+      -- Logica de patrimonio:
+      --   * Permite si ya esta finalizado (Finalizados) sin importar el contrato.
+      --   * Permite si el contrato no requeria levantamiento y el tramite no esta En proceso.
+      --   * Bloquea cualquier otro caso.
       AND (
-        -- Caso A: tabla oficial de estado_patrimonio marca que no hay patrimonio activo
-        d.estado_patrimonio IN ('Sin patrimonio', 'Patrimonio levantado')
-        -- Caso B: sin registro en esa tabla, usamos gravamenes_del_apartamento como fallback.
-        -- Excluye CUALQUIER gravamen que mencione patrimonio, salvo el de
-        -- hijos mayores (que no requiere autorizacion de juzgado).
+        epa.flag = 'Finalizados'
         OR (
-          d.estado_patrimonio IS NULL
-          AND (
-            gs.gravamen IS NULL
-            OR (
-              LOWER(gs.gravamen) NOT LIKE '%patrimonio%'
-              OR LOWER(gs.gravamen) LIKE '%mayores%'
-              OR LOWER(gs.gravamen) LIKE '%sin hijos%'
-            )
-          )
+          COALESCE(cd.c_tipo_contrato_firmado, '') != 'Contrato de Corretaje con patrimonio de familia'
+          AND COALESCE(epa.flag, '') != 'En proceso'
         )
       )
-      -- Excluye los que firmaron el contrato de corretaje con patrimonio de familia:
-      -- esos los gestiona el equipo de levantamiento de Habi, no requieren accion del comercial.
-      AND COALESCE(cd.c_tipo_contrato_firmado, '') != 'Contrato de Corretaje con patrimonio de familia'
-      -- Excluye patrimonio sin levantar (en proceso o desistido) segun control_tower.
-      AND pnl.nid IS NULL
+      -- Fallback por gravamen del seller cuando no hay info en control_tower.
+      AND (
+        epa.flag IS NOT NULL
+        OR gs.gravamen IS NULL
+        OR LOWER(gs.gravamen) NOT LIKE '%patrimonio%'
+        OR LOWER(gs.gravamen) LIKE '%mayores%'
+        OR LOWER(gs.gravamen) LIKE '%sin hijos%'
+      )
       AND LOWER(COALESCE(cd.ciudad, '')) NOT LIKE '%jamundi%'
       AND LOWER(COALESCE(cd.ciudad, '')) NOT LIKE '%jamundí%'
     ORDER BY cd.c_fecha_captacion DESC
@@ -1538,18 +1534,17 @@ def api_por_publicar():
         ON pc.id = pi.property_card_id
       WHERE pi.source_image_id = 1
     ),
-    patrimonio_no_levantado AS (
-      -- NIDs cuyo patrimonio de familia esta en proceso o fue desistido en el lado vendedor.
-      -- Si aparecen aqui NO deben mostrarse para publicar.
-      SELECT DISTINCT CAST(nid AS STRING) AS nid
-      FROM `papyrus-delivery-data.operaciones_global.control_tower_saneamiento_co_bi`
-      -- Solo bloquear si el levantamiento sigue EN PROCESO.
-      -- Los 'Desistidos' en control_tower se manejan aparte:
-      --   * Si el contrato firmado fue 'Contrato de Corretaje con patrimonio de familia',
-      --     ya se excluye por el filtro de tipo de contrato.
-      --   * Si el contrato fue normal/exclusividad, el desistimiento del tramite indica
-      --     que no era necesario levantar (probable hijos mayores) -> SI publicar.
-      WHERE v_flag_desistidos_patrimonio = 'En proceso'
+    estado_patrimonio_actual AS (
+      -- Ultimo flag de patrimonio por NID (no filtramos por flag).
+      SELECT CAST(nid AS STRING) AS nid, v_flag_desistidos_patrimonio AS flag
+      FROM (
+        SELECT nid, v_flag_desistidos_patrimonio,
+          ROW_NUMBER() OVER (
+            PARTITION BY nid
+            ORDER BY v_fecha_inicio_fase_actual_patrimonio_de_familia DESC
+          ) AS rn
+        FROM `papyrus-delivery-data.operaciones_global.control_tower_saneamiento_co_bi`
+      ) WHERE rn = 1
     ),
     base AS (
       SELECT cd.nid, COALESCE(h.hubspot_owner_id, cd.c_comercial_captacion) AS c_comercial_captacion, cd.ciudad, COALESCE(h.equipo_sellers, cd.c_equipo_seller) AS c_equipo_seller,
@@ -1568,19 +1563,22 @@ def api_por_publicar():
         ON SAFE_CAST(cd.nid AS INT64) = h.nid AND h.pipeline = '803674753'
       LEFT JOIN tiene_fotos_cliente fc ON cd.nid = fc.nid
       LEFT JOIN tiene_fotos_360 f360 ON cd.nid = f360.nid
-      LEFT JOIN patrimonio_no_levantado pnl ON CAST(cd.nid AS STRING) = pnl.nid
+      LEFT JOIN estado_patrimonio_actual epa ON CAST(cd.nid AS STRING) = epa.nid
       WHERE cd.fecha_desistio_inmobiliaria IS NULL
         AND h.fecha_desistio_inmobiliaria IS NULL
         AND (h.dealstage IS NULL OR h.dealstage != '1182117639')
         AND cd.c_fecha_captacion IS NOT NULL
-        AND d.estado_patrimonio = 'Sin patrimonio'
         AND b.status = 'Finalizado'
         AND f360.nid IS NULL
-        -- Excluye los que tienen patrimonio sin levantar (en proceso o desistido)
-        -- segun control_tower_saneamiento_co_bi.
-        AND pnl.nid IS NULL
-        -- Por consistencia, tambien excluye los que firmaron contrato con patrimonio de familia.
-        AND COALESCE(cd.c_tipo_contrato_firmado, '') != 'Contrato de Corretaje con patrimonio de familia'
+        -- Logica de patrimonio: permite si ya esta finalizado (Finalizados) o si
+        -- el contrato no requeria levantamiento y el tramite no esta En proceso.
+        AND (
+          epa.flag = 'Finalizados'
+          OR (
+            COALESCE(cd.c_tipo_contrato_firmado, '') != 'Contrato de Corretaje con patrimonio de familia'
+            AND COALESCE(epa.flag, '') != 'En proceso'
+          )
+        )
         AND (d.date_publication IS NULL OR fc.nid IS NOT NULL)
         AND (cd.date_publication IS NULL OR fc.nid IS NOT NULL)
         AND cd.v_fecha_venta IS NULL
@@ -1648,40 +1646,39 @@ def api_por_publicar():
               GROUP BY nid
             ) gs ON cd.nid = gs.nid
             LEFT JOIN (
-              SELECT DISTINCT CAST(nid AS STRING) AS nid
-              FROM `papyrus-delivery-data.operaciones_global.control_tower_saneamiento_co_bi`
-              -- Solo bloquear si el levantamiento sigue EN PROCESO.
-      -- Los 'Desistidos' en control_tower se manejan aparte:
-      --   * Si el contrato firmado fue 'Contrato de Corretaje con patrimonio de familia',
-      --     ya se excluye por el filtro de tipo de contrato.
-      --   * Si el contrato fue normal/exclusividad, el desistimiento del tramite indica
-      --     que no era necesario levantar (probable hijos mayores) -> SI publicar.
-      WHERE v_flag_desistidos_patrimonio = 'En proceso'
-            ) pnl ON CAST(cd.nid AS STRING) = pnl.nid
+              SELECT CAST(nid AS STRING) AS nid, v_flag_desistidos_patrimonio AS flag
+              FROM (
+                SELECT nid, v_flag_desistidos_patrimonio,
+                  ROW_NUMBER() OVER (
+                    PARTITION BY nid
+                    ORDER BY v_fecha_inicio_fase_actual_patrimonio_de_familia DESC
+                  ) AS rn
+                FROM `papyrus-delivery-data.operaciones_global.control_tower_saneamiento_co_bi`
+              ) WHERE rn = 1
+            ) epa ON CAST(cd.nid AS STRING) = epa.nid
             WHERE CAST(cd.nid AS STRING) IN ({nids_str})
               AND cd.fecha_desistio_inmobiliaria IS NULL
               AND (d.date_publication IS NULL OR fc.nid IS NOT NULL)
               AND (cd.date_publication IS NULL OR fc.nid IS NOT NULL)
               AND cd.v_fecha_venta IS NULL
               AND fp.nid IS NULL
-              -- Excluye patrimonio con hijos menores activo o desistido
-              -- (combinacion de detalle_estado_captaciones + gravamen + control_tower).
+              -- Logica de patrimonio: permite si ya esta finalizado, o si el contrato
+              -- no requeria levantamiento y el tramite no esta En proceso.
               AND (
-                d.estado_patrimonio IN ('Sin patrimonio', 'Patrimonio levantado')
+                epa.flag = 'Finalizados'
                 OR (
-                  d.estado_patrimonio IS NULL
-                  AND (
-                    gs.gravamen IS NULL
-                    OR (
-                      LOWER(gs.gravamen) NOT LIKE '%patrimonio%'
-                      OR LOWER(gs.gravamen) LIKE '%mayores%'
-                      OR LOWER(gs.gravamen) LIKE '%sin hijos%'
-                    )
-                  )
+                  COALESCE(cd.c_tipo_contrato_firmado, '') != 'Contrato de Corretaje con patrimonio de familia'
+                  AND COALESCE(epa.flag, '') != 'En proceso'
                 )
               )
-              AND pnl.nid IS NULL
-              AND COALESCE(cd.c_tipo_contrato_firmado, '') != 'Contrato de Corretaje con patrimonio de familia'
+              -- Fallback por gravamen.
+              AND (
+                epa.flag IS NOT NULL
+                OR gs.gravamen IS NULL
+                OR LOWER(gs.gravamen) NOT LIKE '%patrimonio%'
+                OR LOWER(gs.gravamen) LIKE '%mayores%'
+                OR LOWER(gs.gravamen) LIKE '%sin hijos%'
+              )
             """
             try:
                 for row in client.query(q_extra).result():
@@ -1795,16 +1792,16 @@ def api_por_publicar_fotos_correo():
       FROM `papyrus-data.habi_wh_inmobiliaria.habiinmobiliaria_sellers_gestion`
       GROUP BY nid
     ),
-    patrimonio_no_levantado AS (
-      SELECT DISTINCT CAST(nid AS STRING) AS nid
-      FROM `papyrus-delivery-data.operaciones_global.control_tower_saneamiento_co_bi`
-      -- Solo bloquear si el levantamiento sigue EN PROCESO.
-      -- Los 'Desistidos' en control_tower se manejan aparte:
-      --   * Si el contrato firmado fue 'Contrato de Corretaje con patrimonio de familia',
-      --     ya se excluye por el filtro de tipo de contrato.
-      --   * Si el contrato fue normal/exclusividad, el desistimiento del tramite indica
-      --     que no era necesario levantar (probable hijos mayores) -> SI publicar.
-      WHERE v_flag_desistidos_patrimonio = 'En proceso'
+    estado_patrimonio_actual AS (
+      SELECT CAST(nid AS STRING) AS nid, v_flag_desistidos_patrimonio AS flag
+      FROM (
+        SELECT nid, v_flag_desistidos_patrimonio,
+          ROW_NUMBER() OVER (
+            PARTITION BY nid
+            ORDER BY v_fecha_inicio_fase_actual_patrimonio_de_familia DESC
+          ) AS rn
+        FROM `papyrus-delivery-data.operaciones_global.control_tower_saneamiento_co_bi`
+      ) WHERE rn = 1
     )
     SELECT
       CAST(cd.nid AS STRING) AS nid,
@@ -1821,29 +1818,29 @@ def api_por_publicar_fotos_correo():
     LEFT JOIN tiene_fotos_cliente fc ON cd.nid = fc.nid
     LEFT JOIN tiene_fotos_360 f360 ON cd.nid = f360.nid
     LEFT JOIN gravamen_sellers gs ON cd.nid = gs.nid
-    LEFT JOIN patrimonio_no_levantado pnl ON pnl.nid = CAST(cd.nid AS STRING)
+    LEFT JOIN estado_patrimonio_actual epa ON epa.nid = CAST(cd.nid AS STRING)
     WHERE CAST(cd.nid AS STRING) IN ({nids_str})
       AND cd.fecha_desistio_inmobiliaria IS NULL
       AND f360.nid IS NULL
       AND (cd.date_publication IS NULL OR fc.nid IS NOT NULL)
       AND (d.date_publication IS NULL OR fc.nid IS NOT NULL)
-      AND pnl.nid IS NULL
-      -- Excluye patrimonio de familia con hijos menores activo o desistido.
+      -- Logica de patrimonio: permite si ya esta finalizado, o si el contrato
+      -- no requeria levantamiento y el tramite no esta En proceso.
       AND (
-        d.estado_patrimonio IN ('Sin patrimonio', 'Patrimonio levantado')
+        epa.flag = 'Finalizados'
         OR (
-          d.estado_patrimonio IS NULL
-          AND (
-            gs.gravamen IS NULL
-            OR (
-              LOWER(gs.gravamen) NOT LIKE '%patrimonio%'
-              OR LOWER(gs.gravamen) LIKE '%mayores%'
-              OR LOWER(gs.gravamen) LIKE '%sin hijos%'
-            )
-          )
+          COALESCE(cd.c_tipo_contrato_firmado, '') != 'Contrato de Corretaje con patrimonio de familia'
+          AND COALESCE(epa.flag, '') != 'En proceso'
         )
       )
-      AND COALESCE(cd.c_tipo_contrato_firmado, '') != 'Contrato de Corretaje con patrimonio de familia'
+      -- Fallback por gravamen.
+      AND (
+        epa.flag IS NOT NULL
+        OR gs.gravamen IS NULL
+        OR LOWER(gs.gravamen) NOT LIKE '%patrimonio%'
+        OR LOWER(gs.gravamen) LIKE '%mayores%'
+        OR LOWER(gs.gravamen) LIKE '%sin hijos%'
+      )
     """
     try:
         results = client.query(query).result()
@@ -1887,17 +1884,19 @@ def api_por_publicar_sin_fotos():
       FROM `papyrus-data.habi_wh_inmobiliaria.habiinmobiliaria_sellers_gestion`
       GROUP BY nid
     ),
-    patrimonio_no_levantado AS (
-      -- NIDs con patrimonio en proceso o desistido en el lado vendedor.
-      SELECT DISTINCT CAST(nid AS STRING) AS nid
-      FROM `papyrus-delivery-data.operaciones_global.control_tower_saneamiento_co_bi`
-      -- Solo bloquear si el levantamiento sigue EN PROCESO.
-      -- Los 'Desistidos' en control_tower se manejan aparte:
-      --   * Si el contrato firmado fue 'Contrato de Corretaje con patrimonio de familia',
-      --     ya se excluye por el filtro de tipo de contrato.
-      --   * Si el contrato fue normal/exclusividad, el desistimiento del tramite indica
-      --     que no era necesario levantar (probable hijos mayores) -> SI publicar.
-      WHERE v_flag_desistidos_patrimonio = 'En proceso'
+    estado_patrimonio_actual AS (
+      -- Ultimo flag de patrimonio por NID (no filtramos por flag, asi capturamos
+      -- el estado mas reciente). Si un NID se desistio y luego se re-finalizo,
+      -- aqui obtenemos el 'Finalizados' mas reciente, no el 'Desistidos' viejo.
+      SELECT CAST(nid AS STRING) AS nid, v_flag_desistidos_patrimonio AS flag
+      FROM (
+        SELECT nid, v_flag_desistidos_patrimonio,
+          ROW_NUMBER() OVER (
+            PARTITION BY nid
+            ORDER BY v_fecha_inicio_fase_actual_patrimonio_de_familia DESC
+          ) AS rn
+        FROM `papyrus-delivery-data.operaciones_global.control_tower_saneamiento_co_bi`
+      ) WHERE rn = 1
     ),
     -- NIDs marcados como NPH (Nuevo Proyecto Habitacional) en HubSpot.
     -- Estos los gestiona el equipo NPH, no aparecen en este tab.
@@ -1918,12 +1917,11 @@ def api_por_publicar_sin_fotos():
     FROM `papyrus-data.habi_wh_inmobiliaria.consolidado_habi_inmobiliaria` cd
     LEFT JOIN `papyrus-master.squad_bi_global.hubspot_deal` h
       ON SAFE_CAST(cd.nid AS INT64) = h.nid AND h.pipeline = '803674753'
-    LEFT JOIN bubble_unica b ON CAST(cd.nid AS STRING) = b.nid
     LEFT JOIN tiene_fotos_360 f360 ON cd.nid = f360.nid
     LEFT JOIN `papyrus-delivery-data.inmobiliaria.detalle_estado_captaciones` d ON cd.nid = d.nid
     LEFT JOIN gravamen_sellers gs ON cd.nid = gs.nid
     LEFT JOIN nph_nids nph ON nph.nid = CAST(cd.nid AS STRING)
-    LEFT JOIN patrimonio_no_levantado pnl ON pnl.nid = CAST(cd.nid AS STRING)
+    LEFT JOIN estado_patrimonio_actual epa ON epa.nid = CAST(cd.nid AS STRING)
     WHERE cd.c_fecha_captacion IS NOT NULL
       AND cd.fecha_desistio_inmobiliaria IS NULL
       AND h.fecha_desistio_inmobiliaria IS NULL
@@ -1931,30 +1929,26 @@ def api_por_publicar_sin_fotos():
       AND cd.v_fecha_venta IS NULL
       AND (h.dealstage IS NULL OR h.dealstage != '1182117639')
       AND f360.nid IS NULL
-      AND (b.nid IS NULL OR b.status != 'Finalizado')
       AND nph.nid IS NULL  -- excluir NPH
-      AND pnl.nid IS NULL  -- excluir patrimonio sin levantar (en proceso o desistido)
-      -- Excluye patrimonio de familia con hijos menores activo.
-      -- Solo pasa si: ya se levanto, nunca hubo, o el patrimonio es explicitamente
-      -- de hijos mayores (no requiere autorizacion de juzgado).
-      -- 'Patrimonio desistido' NO pasa (no se levanto, se cayo el tramite).
+      -- Logica de patrimonio:
+      --   * Permite si ya esta finalizado (Finalizados) sin importar el contrato.
+      --   * Permite si el contrato no requeria levantamiento y el tramite no esta En proceso.
+      --   * Bloquea cualquier otro caso (En proceso, Desistidos con contrato patrimonio, etc.).
       AND (
-        d.estado_patrimonio IN ('Sin patrimonio', 'Patrimonio levantado')
+        epa.flag = 'Finalizados'
         OR (
-          d.estado_patrimonio IS NULL
-          AND (
-            gs.gravamen IS NULL
-            OR (
-              LOWER(gs.gravamen) NOT LIKE '%patrimonio%'
-              OR LOWER(gs.gravamen) LIKE '%mayores%'
-              OR LOWER(gs.gravamen) LIKE '%sin hijos%'
-            )
-          )
+          COALESCE(cd.c_tipo_contrato_firmado, '') != 'Contrato de Corretaje con patrimonio de familia'
+          AND COALESCE(epa.flag, '') != 'En proceso'
         )
       )
-      -- Excluye los que firmaron el contrato de corretaje con patrimonio de familia:
-      -- esos los gestiona el equipo de levantamiento de Habi, no requieren accion del comercial.
-      AND COALESCE(cd.c_tipo_contrato_firmado, '') != 'Contrato de Corretaje con patrimonio de familia'
+      -- Fallback por gravamen del seller cuando no hay info en control_tower.
+      AND (
+        epa.flag IS NOT NULL
+        OR gs.gravamen IS NULL
+        OR LOWER(gs.gravamen) NOT LIKE '%patrimonio%'
+        OR LOWER(gs.gravamen) LIKE '%mayores%'
+        OR LOWER(gs.gravamen) LIKE '%sin hijos%'
+      )
     ORDER BY cd.c_fecha_captacion DESC
     """
     try:
