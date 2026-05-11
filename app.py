@@ -1381,6 +1381,12 @@ def api_por_agendar():
       FROM `papyrus-data.habi_wh_inmobiliaria.habiinmobiliaria_sellers_gestion`
       GROUP BY nid
     ),
+    patrimonio_no_levantado AS (
+      -- NIDs con patrimonio en proceso o desistido en el lado vendedor.
+      SELECT DISTINCT CAST(nid AS STRING) AS nid
+      FROM `papyrus-delivery-data.operaciones_global.control_tower_saneamiento_co_bi`
+      WHERE v_flag_desistidos_patrimonio IN ('En proceso', 'Desistidos')
+    ),
     conjunto_nid AS (
       SELECT
         CAST(nid_1 AS STRING) AS nid,
@@ -1425,6 +1431,7 @@ def api_por_agendar():
       ON SAFE_CAST(cd.nid AS INT64) = h.nid AND h.pipeline = '803674753'
     LEFT JOIN tiene_fotos_cliente fc ON cd.nid = fc.nid
     LEFT JOIN gravamen_sellers gs ON cd.nid = gs.nid
+    LEFT JOIN patrimonio_no_levantado pnl ON pnl.nid = CAST(cd.nid AS STRING)
     LEFT JOIN conjunto_nid cn ON CAST(cd.nid AS STRING) = cn.nid
     LEFT JOIN fecha_levantamiento fl ON CAST(cd.nid AS STRING) = fl.nid
     WHERE cd.c_fecha_captacion IS NOT NULL
@@ -1467,6 +1474,8 @@ def api_por_agendar():
       -- Excluye los que firmaron el contrato de corretaje con patrimonio de familia:
       -- esos los gestiona el equipo de levantamiento de Habi, no requieren accion del comercial.
       AND COALESCE(cd.c_tipo_contrato_firmado, '') != 'Contrato de Corretaje con patrimonio de familia'
+      -- Excluye patrimonio sin levantar (en proceso o desistido) segun control_tower.
+      AND pnl.nid IS NULL
       AND LOWER(COALESCE(cd.ciudad, '')) NOT LIKE '%jamundi%'
       AND LOWER(COALESCE(cd.ciudad, '')) NOT LIKE '%jamundí%'
     ORDER BY cd.c_fecha_captacion DESC
@@ -1523,6 +1532,13 @@ def api_por_publicar():
         ON pc.id = pi.property_card_id
       WHERE pi.source_image_id = 1
     ),
+    patrimonio_no_levantado AS (
+      -- NIDs cuyo patrimonio de familia esta en proceso o fue desistido en el lado vendedor.
+      -- Si aparecen aqui NO deben mostrarse para publicar.
+      SELECT DISTINCT CAST(nid AS STRING) AS nid
+      FROM `papyrus-delivery-data.operaciones_global.control_tower_saneamiento_co_bi`
+      WHERE v_flag_desistidos_patrimonio IN ('En proceso', 'Desistidos')
+    ),
     base AS (
       SELECT cd.nid, COALESCE(h.hubspot_owner_id, cd.c_comercial_captacion) AS c_comercial_captacion, cd.ciudad, COALESCE(h.equipo_sellers, cd.c_equipo_seller) AS c_equipo_seller,
         DATE(SAFE_CAST(NULLIF(b.fecha_inicio, 'nan') AS TIMESTAMP)) AS Fecha_recorrido,
@@ -1540,6 +1556,7 @@ def api_por_publicar():
         ON SAFE_CAST(cd.nid AS INT64) = h.nid AND h.pipeline = '803674753'
       LEFT JOIN tiene_fotos_cliente fc ON cd.nid = fc.nid
       LEFT JOIN tiene_fotos_360 f360 ON cd.nid = f360.nid
+      LEFT JOIN patrimonio_no_levantado pnl ON CAST(cd.nid AS STRING) = pnl.nid
       WHERE cd.fecha_desistio_inmobiliaria IS NULL
         AND h.fecha_desistio_inmobiliaria IS NULL
         AND (h.dealstage IS NULL OR h.dealstage != '1182117639')
@@ -1547,6 +1564,11 @@ def api_por_publicar():
         AND d.estado_patrimonio = 'Sin patrimonio'
         AND b.status = 'Finalizado'
         AND f360.nid IS NULL
+        -- Excluye los que tienen patrimonio sin levantar (en proceso o desistido)
+        -- segun control_tower_saneamiento_co_bi.
+        AND pnl.nid IS NULL
+        -- Por consistencia, tambien excluye los que firmaron contrato con patrimonio de familia.
+        AND COALESCE(cd.c_tipo_contrato_firmado, '') != 'Contrato de Corretaje con patrimonio de familia'
         AND (d.date_publication IS NULL OR fc.nid IS NOT NULL)
         AND (cd.date_publication IS NULL OR fc.nid IS NOT NULL)
         AND cd.v_fecha_venta IS NULL
@@ -1613,13 +1635,19 @@ def api_por_publicar():
               FROM `papyrus-data.habi_wh_inmobiliaria.habiinmobiliaria_sellers_gestion`
               GROUP BY nid
             ) gs ON cd.nid = gs.nid
+            LEFT JOIN (
+              SELECT DISTINCT CAST(nid AS STRING) AS nid
+              FROM `papyrus-delivery-data.operaciones_global.control_tower_saneamiento_co_bi`
+              WHERE v_flag_desistidos_patrimonio IN ('En proceso', 'Desistidos')
+            ) pnl ON CAST(cd.nid AS STRING) = pnl.nid
             WHERE CAST(cd.nid AS STRING) IN ({nids_str})
               AND cd.fecha_desistio_inmobiliaria IS NULL
               AND (d.date_publication IS NULL OR fc.nid IS NOT NULL)
               AND (cd.date_publication IS NULL OR fc.nid IS NOT NULL)
               AND cd.v_fecha_venta IS NULL
               AND fp.nid IS NULL
-              -- Excluye patrimonio de familia con hijos menores activo o desistido.
+              -- Excluye patrimonio con hijos menores activo o desistido
+              -- (combinacion de detalle_estado_captaciones + gravamen + control_tower).
               AND (
                 d.estado_patrimonio IN ('Sin patrimonio', 'Patrimonio levantado')
                 OR (
@@ -1634,6 +1662,7 @@ def api_por_publicar():
                   )
                 )
               )
+              AND pnl.nid IS NULL
               AND COALESCE(cd.c_tipo_contrato_firmado, '') != 'Contrato de Corretaje con patrimonio de familia'
             """
             try:
@@ -1747,6 +1776,11 @@ def api_por_publicar_fotos_correo():
       SELECT nid, ANY_VALUE(gravamenes_del_apartamento) AS gravamen
       FROM `papyrus-data.habi_wh_inmobiliaria.habiinmobiliaria_sellers_gestion`
       GROUP BY nid
+    ),
+    patrimonio_no_levantado AS (
+      SELECT DISTINCT CAST(nid AS STRING) AS nid
+      FROM `papyrus-delivery-data.operaciones_global.control_tower_saneamiento_co_bi`
+      WHERE v_flag_desistidos_patrimonio IN ('En proceso', 'Desistidos')
     )
     SELECT
       CAST(cd.nid AS STRING) AS nid,
@@ -1763,11 +1797,13 @@ def api_por_publicar_fotos_correo():
     LEFT JOIN tiene_fotos_cliente fc ON cd.nid = fc.nid
     LEFT JOIN tiene_fotos_360 f360 ON cd.nid = f360.nid
     LEFT JOIN gravamen_sellers gs ON cd.nid = gs.nid
+    LEFT JOIN patrimonio_no_levantado pnl ON pnl.nid = CAST(cd.nid AS STRING)
     WHERE CAST(cd.nid AS STRING) IN ({nids_str})
       AND cd.fecha_desistio_inmobiliaria IS NULL
       AND f360.nid IS NULL
       AND (cd.date_publication IS NULL OR fc.nid IS NOT NULL)
       AND (d.date_publication IS NULL OR fc.nid IS NOT NULL)
+      AND pnl.nid IS NULL
       -- Excluye patrimonio de familia con hijos menores activo o desistido.
       AND (
         d.estado_patrimonio IN ('Sin patrimonio', 'Patrimonio levantado')
@@ -1827,6 +1863,12 @@ def api_por_publicar_sin_fotos():
       FROM `papyrus-data.habi_wh_inmobiliaria.habiinmobiliaria_sellers_gestion`
       GROUP BY nid
     ),
+    patrimonio_no_levantado AS (
+      -- NIDs con patrimonio en proceso o desistido en el lado vendedor.
+      SELECT DISTINCT CAST(nid AS STRING) AS nid
+      FROM `papyrus-delivery-data.operaciones_global.control_tower_saneamiento_co_bi`
+      WHERE v_flag_desistidos_patrimonio IN ('En proceso', 'Desistidos')
+    ),
     -- NIDs marcados como NPH (Nuevo Proyecto Habitacional) en HubSpot.
     -- Estos los gestiona el equipo NPH, no aparecen en este tab.
     nph_nids AS (
@@ -1851,6 +1893,7 @@ def api_por_publicar_sin_fotos():
     LEFT JOIN `papyrus-delivery-data.inmobiliaria.detalle_estado_captaciones` d ON cd.nid = d.nid
     LEFT JOIN gravamen_sellers gs ON cd.nid = gs.nid
     LEFT JOIN nph_nids nph ON nph.nid = CAST(cd.nid AS STRING)
+    LEFT JOIN patrimonio_no_levantado pnl ON pnl.nid = CAST(cd.nid AS STRING)
     WHERE cd.c_fecha_captacion IS NOT NULL
       AND cd.fecha_desistio_inmobiliaria IS NULL
       AND h.fecha_desistio_inmobiliaria IS NULL
@@ -1860,6 +1903,7 @@ def api_por_publicar_sin_fotos():
       AND f360.nid IS NULL
       AND (b.nid IS NULL OR b.status != 'Finalizado')
       AND nph.nid IS NULL  -- excluir NPH
+      AND pnl.nid IS NULL  -- excluir patrimonio sin levantar (en proceso o desistido)
       -- Excluye patrimonio de familia con hijos menores activo.
       -- Solo pasa si: ya se levanto, nunca hubo, o el patrimonio es explicitamente
       -- de hijos mayores (no requiere autorizacion de juzgado).
