@@ -1726,8 +1726,11 @@ def api_por_publicar():
             ) epa ON CAST(cd.nid AS STRING) = epa.nid
             WHERE CAST(cd.nid AS STRING) IN ({nids_str})
               AND cd.fecha_desistio_inmobiliaria IS NULL
-              AND (d.date_publication IS NULL OR fc.nid IS NOT NULL)
-              AND (cd.date_publication IS NULL OR fc.nid IS NOT NULL)
+              -- Solo NIDs aun NO publicados. Si ya estan publicados con logo
+              -- morado (source_image_id=3) y sin fotos reales, van al tab
+              -- "Por Publicar Sin Fotos", no al principal.
+              AND cd.date_publication IS NULL
+              AND d.date_publication IS NULL
               AND cd.v_fecha_venta IS NULL
               AND fp.nid IS NULL
               -- Logica de patrimonio: permite si ya esta finalizado, o si el contrato
