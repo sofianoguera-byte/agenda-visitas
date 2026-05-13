@@ -235,19 +235,18 @@ def parsear_correo(msg):
 
 
 def leer_completados_correo():
-    """Lee correos de los ultimos 3 dias y extrae los NIDs visitados (SI).
+    """Lee correos de los ultimos 30 dias y extrae los NIDs visitados (SI).
 
-    Antes leiamos desde el dia 1 del mes; eso arrastraba "SI" viejos cuando
-    una visita reportada hace 8 dias seguia sin tener fotos reales subidas,
-    haciendo que el NID volviera a aparecer en Por Publicar dia tras dia.
-    Una ventana corta usa el correo solo como senal "se hizo HOY/AYER".
+    Por Publicar muestra todos los NIDs reportados SI que aun no tienen
+    fotos reales en CMS, sin importar hace cuanto fue la visita. Si una
+    visita fue hace 4 dias y aun no se publica, debe seguir apareciendo.
     """
     try:
         mail = imaplib.IMAP4_SSL("imap.gmail.com")
         mail.login(EMAIL_USER, EMAIL_PASS)
         mail.select("inbox")
 
-        desde = (datetime.now() - timedelta(days=3)).strftime("%d-%b-%Y")
+        desde = (datetime.now() - timedelta(days=30)).strftime("%d-%b-%Y")
         status, messages = mail.search(None, f'FROM "gerencia@cleaningms.com.co" SINCE {desde}')
         ids = messages[0].split()
         if not ids:
