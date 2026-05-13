@@ -505,6 +505,22 @@
         </div>
     </div>
 
+    <div class="modal-overlay" id="modal-no-publicar">
+        <div class="modal">
+            <h2>Confirmar &quot;No publicado&quot;</h2>
+            <p>¿Confirmas que el NID <strong id="modal-nopub-nid"></strong> <strong>NO</strong> se va a publicar?</p>
+            <p id="modal-nopub-motivo-box" style="background:#fef3c7;padding:8px 12px;border-radius:6px;font-size:13px;display:none;">
+                <strong>Motivo (del sheet):</strong> <span id="modal-nopub-motivo"></span><br>
+                <span id="modal-nopub-obs-row" style="display:none;"><strong>Observaciones:</strong> <span id="modal-nopub-obs"></span></span>
+            </p>
+            <p style="color:#6b7280;font-size:13px;">Al confirmar, el inmueble saldrá de <em>Por Publicar</em> y aparecerá en <em>Por Agendar</em>.</p>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" onclick="cerrarModalNoPublicar()">Volver</button>
+                <button class="btn btn-cancelar" onclick="confirmarNoPublicar()">Sí, no se publica</button>
+            </div>
+        </div>
+    </div>
+
     <div class="toast" id="toast"></div>
 
     <script>
@@ -612,6 +628,7 @@
             const span = document.getElementById('usuario-actual');
             if (span) span.textContent = u || 'no identificado';
             fetchVisitas();
+            cargarMotivosNoPublicar();
         });
 
         document.getElementById('search').addEventListener('input', renderCards);
@@ -1554,8 +1571,12 @@
             const cf = document.getElementById('filter-comercial-pub').value;
             const sf = document.getElementById('filter-estado-pub').value;
             return porPublicar.filter(v => {
-                const ms = !search || v.nid.includes(search) || v.ciudad.toLowerCase().includes(search) || v.comercial.toLowerCase().includes(search) || v.estado_actual.toLowerCase().includes(search);
                 const ps = pubStatusMap[v.nid] || 'pendiente';
+                // Ocultar de Por Publicar los marcados como "no_publicado":
+                // pasan a aparecer en Por Agendar. Excepcion: si el filtro
+                // explicitamente pide ver "no_publicado", se respetan.
+                if (ps === 'no_publicado' && sf !== 'no_publicado') return false;
+                const ms = !search || v.nid.includes(search) || v.ciudad.toLowerCase().includes(search) || v.comercial.toLowerCase().includes(search) || v.estado_actual.toLowerCase().includes(search);
                 return ms && (ef === 'todos' || v.equipo === ef) && (cf === 'todos' || v.comercial === cf) && (sf === 'todos' || ps === sf);
             });
         }
@@ -1602,7 +1623,97 @@
             document.getElementById('stat-pub-pendientes').textContent = total - pub - nopub;
         }
 
+        // Datos en memoria del sheet de motivos por los que NO se publica (cargados en background).
+        let motivosNoPublicarMap = {};
+
+        async function cargarMotivosNoPublicar() {
+            try {
+                const r = await fetch('/api/motivos-no-publicar');
+                motivosNoPublicarMap = await r.json();
+            } catch (e) {
+                console.warn('No se pudieron cargar motivos no publicar', e);
+                motivosNoPublicarMap = {};
+            }
+        }
+
+        let pendingNoPubNid = null;
+
+        function abrirModalNoPublicar(nid) {
+            pendingNoPubNid = nid;
+            document.getElementById('modal-nopub-nid').textContent = nid;
+            const m = motivosNoPublicarMap[nid] || null;
+            const box = document.getElementById('modal-nopub-motivo-box');
+            if (m && (m.motivo || m.observaciones)) {
+                document.getElementById('modal-nopub-motivo').textContent = m.motivo || '(sin motivo en sheet)';
+                if (m.observaciones) {
+                    document.getElementById('modal-nopub-obs-row').style.display = 'inline';
+                    document.getElementById('modal-nopub-obs').textContent = m.observaciones;
+                } else {
+                    document.getElementById('modal-nopub-obs-row').style.display = 'none';
+                }
+                box.style.display = 'block';
+            } else {
+                box.style.display = 'none';
+            }
+            document.getElementById('modal-no-publicar').classList.add('active');
+        }
+
+        function cerrarModalNoPublicar() {
+            pendingNoPubNid = null;
+            document.getElementById('modal-no-publicar').classList.remove('active');
+        }
+
+        async function confirmarNoPublicar() {
+            const nid = pendingNoPubNid;
+            if (!nid) { cerrarModalNoPublicar(); return; }
+            pubStatusMap[nid] = 'no_publicado';
+            guardarEstadoPermanente(nid, 'ps:no_publicado');
+            cerrarModalNoPublicar();
+            renderPorPublicar();
+            // Insertar en porAgendar si no esta ya y refrescar render
+            ensureNidInPorAgendar(nid);
+            renderPorAgendar();
+            showToast('NID ' + nid + ' movido a Por Agendar', 'info');
+        }
+
+        function ensureNidInPorAgendar(nid) {
+            if (porAgendar.some(v => v.nid === nid)) return;
+            const src = porPublicar.find(v => v.nid === nid) || {};
+            const m = motivosNoPublicarMap[nid] || {};
+            porAgendar.push({
+                nid: nid,
+                comercial: src.comercial || '',
+                equipo: src.equipo || '',
+                ciudad: src.ciudad || '',
+                conjunto: '',
+                fecha_captacion: '',
+                fecha_levantamiento: '',
+                telefono_cliente: '',
+                ultimo_status: 'Marcado no publicado',
+                tipo_fotos: 'Sin publicar',
+                motivo_no_pub: m.motivo || '',
+                observaciones_no_pub: m.observaciones || '',
+                origen: 'no_publicado',
+            });
+        }
+
         function togglePubStatus(nid, status) {
+            // Click sobre "No publicado" -> mostrar modal de confirmacion.
+            // Si ya estaba marcado como no_publicado y se vuelve a clickear, se quita.
+            if (status === 'no_publicado') {
+                if (pubStatusMap[nid] === 'no_publicado') {
+                    delete pubStatusMap[nid];
+                    guardarEstadoPermanente(nid, 'ps:');
+                    // Quitar de porAgendar si lo habiamos agregado
+                    porAgendar = porAgendar.filter(v => !(v.nid === nid && v.origen === 'no_publicado'));
+                    renderPorPublicar();
+                    renderPorAgendar();
+                    return;
+                }
+                abrirModalNoPublicar(nid);
+                return;
+            }
+            // Otros estados (publicado / clear)
             if (pubStatusMap[nid] === status) {
                 delete pubStatusMap[nid];
                 guardarEstadoPermanente(nid, 'ps:');
@@ -1651,6 +1762,14 @@
                 const res = await fetch('/api/por-agendar');
                 porAgendar = await res.json();
                 agendarLoaded = true;
+                // Si Por Publicar ya esta cargado, agregar aqui los NIDs marcados
+                // como no_publicado. Si no, se cargara en background y se mergea
+                // cuando llegue.
+                if (publicarLoaded) {
+                    mergeNoPublicadoEnAgendar();
+                } else {
+                    fetchPorPublicar().then(() => { mergeNoPublicadoEnAgendar(); renderPorAgendar(); });
+                }
                 document.getElementById('loading-ag').style.display = 'none';
                 if (porAgendar.length === 0) {
                     document.getElementById('empty-ag').style.display = 'block';
@@ -1669,6 +1788,15 @@
             } catch (err) {
                 document.getElementById('loading-ag').innerHTML = '<p style="color:#ef4444;">Error al cargar.</p>';
             }
+        }
+
+        function mergeNoPublicadoEnAgendar() {
+            // Toma los NIDs marcados ps:no_publicado en porPublicar y los inyecta
+            // en porAgendar (si no estan ya), con el motivo del sheet de motivos.
+            porPublicar.forEach(v => {
+                if (pubStatusMap[v.nid] !== 'no_publicado') return;
+                ensureNidInPorAgendar(v.nid);
+            });
         }
 
         function getFilteredAgendar() {
@@ -1732,10 +1860,29 @@
 
             tbody.innerHTML = filtered.map(v => {
                 const phone = formatPhoneAg(v.telefono_cliente);
+                const esNoPub = v.origen === 'no_publicado' || pubStatusMap[v.nid] === 'no_publicado';
                 const esPubSinFotos = v.tipo_fotos === 'Publicado sin fotos profesionales';
-                const tagColor = esPubSinFotos ? 'background:#dbeafe;color:#1e40af;' : 'background:#fef3c7;color:#92400e;';
-                const tagText = esPubSinFotos ? 'Publicado sin fotos' : 'Sin publicar';
-                const rowBg = esPubSinFotos ? '#f0f9ff' : 'white';
+                let tagColor, tagText, rowBg;
+                if (esNoPub) {
+                    tagColor = 'background:#fee2e2;color:#991b1b;';
+                    tagText = 'No se publicó';
+                    rowBg = '#fef2f2';
+                } else if (esPubSinFotos) {
+                    tagColor = 'background:#dbeafe;color:#1e40af;';
+                    tagText = 'Publicado sin fotos';
+                    rowBg = '#f0f9ff';
+                } else {
+                    tagColor = 'background:#fef3c7;color:#92400e;';
+                    tagText = 'Sin publicar';
+                    rowBg = 'white';
+                }
+                // Si es no_publicado, mostrar motivo/observaciones del sheet en el cell de status
+                const m = motivosNoPublicarMap[v.nid] || {};
+                const motivo = v.motivo_no_pub || m.motivo || '';
+                const obs = v.observaciones_no_pub || m.observaciones || '';
+                const statusCell = esNoPub
+                    ? `<div style="font-size:12px;line-height:1.4;"><strong style="color:#991b1b;">No publicado</strong>${motivo ? `<div style="color:#374151;">Motivo: ${motivo}</div>` : '<div style="color:#9ca3af;font-style:italic;">Sin motivo en sheet</div>'}${obs ? `<div style="color:#6b7280;font-size:11px;">Obs: ${obs}</div>` : ''}</div>`
+                    : `${v.ultimo_status || 'Sin visita'}`;
                 return `
                 <tr style="border-bottom:1px solid #e5e7eb;background:${rowBg};">
                     <td style="padding:10px 16px;font-weight:600;font-size:13px;">${v.nid}</td>
@@ -1746,7 +1893,7 @@
                     <td style="padding:10px 16px;font-size:13px;">${v.fecha_captacion || 'N/A'}</td>
                     <td style="padding:10px 16px;font-size:13px;">${v.fecha_levantamiento || ''}</td>
                     <td style="padding:10px 16px;font-size:13px;">${v.telefono_cliente || 'Sin teléfono'}</td>
-                    <td style="padding:10px 16px;font-size:13px;">${v.ultimo_status || 'Sin visita'}</td>
+                    <td style="padding:10px 16px;font-size:13px;">${statusCell}</td>
                     <td style="padding:10px 16px;"><span style="padding:4px 10px;border-radius:20px;font-size:11px;font-weight:700;${tagColor}">${tagText}</span></td>
                     <td style="padding:10px 16px;white-space:nowrap;">
                         <a href="https://visitahabi.bubbleapps.io/home_algoritmo" target="_blank" class="btn btn-sm" style="background:#f59e0b;">Agendar</a>

@@ -1236,11 +1236,32 @@ SHEETS_ID_LINKS = "1ZvSbRye1Mq-mv6iIW1IyaFbG97aJsXffBc0Gkd-mylk"
 # Las dos pestañas del Sheet de links: Bogota y Ciudades (gids reales de cada tab)
 SHEETS_GIDS_LINKS = ["2114137646", "744289895"]
 
+# Sheet de motivos por los que un NID no se va a publicar.
+# Pestaña BOGOTA HI -> casos Bogota.  Pestaña CIUDADES HI -> resto.
+SHEETS_ID_MOTIVOS = "1TtNbf8oJuSwgjm5B-p1tjq8zkyCbc438ndCTQ4pWoJw"
+SHEETS_MOTIVOS_TABS = {"BOGOTA HI": "Bogotá", "CIUDADES HI": "Ciudades"}
+
 
 def _read_csv_by_gid(sheet_id, gid):
     """Lee una pestaña especifica por su gid numerico."""
     url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv&gid={gid}"
     r = http_requests.get(url, timeout=20)
+    r.encoding = "utf-8"
+    text = r.text
+    if text.startswith("﻿"):
+        text = text[1:]
+    reader = csv.DictReader(io.StringIO(text))
+    fieldnames = reader.fieldnames or []
+    return list(reader), fieldnames
+
+
+def _read_csv_by_sheet_name(sheet_id, sheet_name):
+    """Lee una pestaña por nombre (requiere que el sheet sea publico)."""
+    from urllib.parse import quote
+    url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/gviz/tq?tqx=out:csv&sheet={quote(sheet_name)}"
+    r = http_requests.get(url, timeout=20)
+    if r.status_code != 200:
+        raise RuntimeError(f"HTTP {r.status_code} en sheet '{sheet_name}'")
     r.encoding = "utf-8"
     text = r.text
     if text.startswith("﻿"):
@@ -1283,6 +1304,55 @@ def get_links_publicacion():
         except Exception as e:
             print(f"[links] error leyendo gid={gid}: {e}")
     return links
+
+
+def leer_motivos_no_publicar():
+    """Lee el sheet de motivos (BOGOTA HI / CIUDADES HI) y devuelve dict
+    {nid: {motivo, observaciones, fuente}}.
+
+    Si el sheet esta privado (401) devuelve dict vacio sin romper.
+    """
+    motivos = {}
+    for tab_name, fuente in SHEETS_MOTIVOS_TABS.items():
+        try:
+            rows, fieldnames = _read_csv_by_sheet_name(SHEETS_ID_MOTIVOS, tab_name)
+        except Exception as e:
+            print(f"[motivos] no se pudo leer pestaña '{tab_name}': {e}")
+            continue
+        if not rows:
+            continue
+
+        def _find(*keys):
+            for k in keys:
+                for f in fieldnames:
+                    if (f or "").strip().lower() == k.lower():
+                        return f
+            return None
+
+        nid_col = _find("nid", "NID", "Nid", "id", "ID")
+        motivo_col = _find("motivo", "Motivo", "Razon", "Razón", "Causa",
+                           "Motivo no publicar", "Motivo por el que no se publica")
+        obs_col = _find("observaciones", "Observaciones", "Observaciones generales",
+                        "Obs", "Comentario", "Comentarios", "Notas")
+        if not nid_col:
+            print(f"[motivos] tab '{tab_name}' sin columna NID. headers={fieldnames}")
+            continue
+        for row in rows:
+            nid = str(row.get(nid_col, "")).strip()
+            if not nid:
+                continue
+            motivos[nid] = {
+                "motivo": (row.get(motivo_col) or "").strip() if motivo_col else "",
+                "observaciones": (row.get(obs_col) or "").strip() if obs_col else "",
+                "fuente": fuente,
+            }
+    return motivos
+
+
+@app.route("/api/motivos-no-publicar")
+def api_motivos_no_publicar():
+    """Diccionario NID -> {motivo, observaciones, fuente} desde el sheet de motivos."""
+    return jsonify(leer_motivos_no_publicar())
 
 
 @app.route("/api/links")
@@ -1617,6 +1687,18 @@ def api_por_publicar():
         if nids_nuevos:
             nids_str = ",".join(f"'{n}'" for n in nids_nuevos)
             q_extra = f"""
+            WITH bubble_ultima AS (
+              -- Estado mas reciente de cada NID dentro de Habi Inmobiliaria.
+              -- Si la ultima visita aun no esta Finalizada (ej. Cerrado/Agendado/
+              -- Cancelado/No realizada), el correo de cleaning podria ser una
+              -- referencia stale -> no agregar via este path.
+              SELECT nid, status FROM (
+                SELECT b.nid, b.status,
+                  ROW_NUMBER() OVER (PARTITION BY b.nid ORDER BY b.modified_date DESC) AS rn
+                FROM `papyrus-master.bubble_gold.mart_bubble_schedule_co` b
+                WHERE b.visit_category = 'Habi Inmobiliaria'
+              ) WHERE rn = 1
+            )
             SELECT CAST(cd.nid AS STRING) AS nid, cd.c_comercial_captacion, cd.ciudad, cd.c_equipo_seller,
               d.estado_patrimonio
             FROM `papyrus-data.habi_wh_inmobiliaria.consolidado_habi_inmobiliaria` cd
@@ -1651,6 +1733,7 @@ def api_por_publicar():
                 FROM `papyrus-delivery-data.operaciones_global.control_tower_saneamiento_co_bi`
               ) WHERE rn = 1
             ) epa ON CAST(cd.nid AS STRING) = epa.nid
+            LEFT JOIN bubble_ultima bu ON CAST(cd.nid AS STRING) = bu.nid
             WHERE CAST(cd.nid AS STRING) IN ({nids_str})
               AND cd.fecha_desistio_inmobiliaria IS NULL
               AND (d.date_publication IS NULL OR fc.nid IS NOT NULL)
@@ -1666,7 +1749,15 @@ def api_por_publicar():
                   AND COALESCE(epa.flag, '') != 'En proceso'
                 )
               )
-              -- Sin filtro adicional por gravamen (regla del contrato gobierna).
+              -- Si la ultima visita en Bubble (Habi Inmo) sigue en algun estado
+              -- que indica que la visita aun no se hizo (Cerrado / Agendado /
+              -- Cancelado / No realizada), el correo de cleaning probablemente
+              -- es de una visita previa reagendada -> excluir hasta que Bubble
+              -- la marque como Finalizado.
+              AND (
+                bu.status IS NULL
+                OR bu.status NOT IN ('Cerrado', 'Agendado', 'Cancelado', 'No realizada')
+              )
             """
             try:
                 for row in client.query(q_extra).result():
