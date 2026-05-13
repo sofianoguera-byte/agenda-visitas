@@ -235,13 +235,19 @@ def parsear_correo(msg):
 
 
 def leer_completados_correo():
-    """Lee correos del mes y extrae los NIDs visitados (SI)."""
+    """Lee correos de los ultimos 3 dias y extrae los NIDs visitados (SI).
+
+    Antes leiamos desde el dia 1 del mes; eso arrastraba "SI" viejos cuando
+    una visita reportada hace 8 dias seguia sin tener fotos reales subidas,
+    haciendo que el NID volviera a aparecer en Por Publicar dia tras dia.
+    Una ventana corta usa el correo solo como senal "se hizo HOY/AYER".
+    """
     try:
         mail = imaplib.IMAP4_SSL("imap.gmail.com")
         mail.login(EMAIL_USER, EMAIL_PASS)
         mail.select("inbox")
 
-        desde = datetime.now().replace(day=1).strftime("%d-%b-%Y")
+        desde = (datetime.now() - timedelta(days=3)).strftime("%d-%b-%Y")
         status, messages = mail.search(None, f'FROM "gerencia@cleaningms.com.co" SINCE {desde}')
         ids = messages[0].split()
         if not ids:
@@ -1576,31 +1582,33 @@ def api_por_agendar():
 
 @app.route("/api/por-publicar")
 def api_por_publicar():
-    query = """
-    WITH bubble_unica AS (
-      SELECT * FROM (
-        SELECT b.*,
-          ROW_NUMBER() OVER (PARTITION BY b.nid ORDER BY b.modified_date DESC) AS rn
-        FROM `papyrus-master.bubble_gold.mart_bubble_schedule_co` b
-        WHERE b.visit_category = 'Habi Inmobiliaria'
-      ) WHERE rn = 1
-    ),
-    tiene_fotos_cliente AS (
+    """Por Publicar: usa el correo de cleaning como fuente de verdad para
+    '360 finalizado'. Filtros: no vendido, no desistido, patrimonio OK,
+    sin fotos reales en CMS, y no publicado o publicado con logo morado
+    (source_image_id = 3).
+    """
+    completados = leer_completados_correo()
+    nids_correo = list({c["nid"] for c in completados if c.get("nid")})
+    if not nids_correo:
+        return jsonify([])
+
+    nids_str = ",".join(f"'{n}'" for n in nids_correo)
+    query = f"""
+    WITH tiene_fotos_cliente AS (
       SELECT DISTINCT pc.nid
       FROM `papyrus-data.habi_brokers_listing.property_card` pc
       INNER JOIN `papyrus-data.habi_brokers_listing.property_image` pi
         ON pc.id = pi.property_card_id
-      WHERE pi.source_image_id = 3
+      WHERE pi.source_image_id = 3 AND pi.deleted_at IS NULL
     ),
     tiene_fotos_360 AS (
       SELECT DISTINCT pc.nid
       FROM `papyrus-data.habi_brokers_listing.property_card` pc
       INNER JOIN `papyrus-data.habi_brokers_listing.property_image` pi
         ON pc.id = pi.property_card_id
-      WHERE pi.source_image_id = 1
+      WHERE pi.source_image_id = 1 AND pi.deleted_at IS NULL
     ),
     estado_patrimonio_actual AS (
-      -- Ultimo flag de patrimonio por NID (no filtramos por flag).
       SELECT CAST(nid AS STRING) AS nid, v_flag_desistidos_patrimonio AS flag
       FROM (
         SELECT nid, v_flag_desistidos_patrimonio,
@@ -1610,170 +1618,86 @@ def api_por_publicar():
           ) AS rn
         FROM `papyrus-delivery-data.operaciones_global.control_tower_saneamiento_co_bi`
       ) WHERE rn = 1
-    ),
-    base AS (
-      SELECT cd.nid, COALESCE(h.hubspot_owner_id, cd.c_comercial_captacion) AS c_comercial_captacion, cd.ciudad, COALESCE(h.equipo_sellers, cd.c_equipo_seller) AS c_equipo_seller,
-        DATE(SAFE_CAST(NULLIF(b.fecha_inicio, 'nan') AS TIMESTAMP)) AS Fecha_recorrido,
-        b.status,
-        d.estado_patrimonio,
-        d.date_publication,
-        CASE WHEN pc.id IS NULL THEN 'Sin CMS' ELSE 'Con CMS' END AS ficha_cms,
-        CASE WHEN fc.nid IS NOT NULL THEN 'Publicado sin fotos profesionales'
-             ELSE 'Sin publicar' END AS tipo_fotos
-      FROM `papyrus-data.habi_wh_inmobiliaria.consolidado_habi_inmobiliaria` cd
-      LEFT JOIN bubble_unica b ON CAST(cd.nid AS STRING) = b.nid
-      LEFT JOIN `papyrus-data.habi_brokers_listing.property_card` pc ON cd.nid = pc.nid
-      LEFT JOIN `papyrus-delivery-data.inmobiliaria.detalle_estado_captaciones` d ON cd.nid = d.nid
-      LEFT JOIN `papyrus-master.squad_bi_global.hubspot_deal` h
-        ON SAFE_CAST(cd.nid AS INT64) = h.nid AND h.pipeline = '803674753'
-      LEFT JOIN tiene_fotos_cliente fc ON cd.nid = fc.nid
-      LEFT JOIN tiene_fotos_360 f360 ON cd.nid = f360.nid
-      LEFT JOIN estado_patrimonio_actual epa ON CAST(cd.nid AS STRING) = epa.nid
-      WHERE cd.fecha_desistio_inmobiliaria IS NULL
-        AND h.fecha_desistio_inmobiliaria IS NULL
-        AND (h.dealstage IS NULL OR h.dealstage != '1182117639')
-        AND cd.c_fecha_captacion IS NOT NULL
-        AND b.status = 'Finalizado'
-        AND f360.nid IS NULL
-        -- Logica de patrimonio: permite si ya esta finalizado (Finalizados) o si
-        -- el contrato no requeria levantamiento y el tramite no esta En proceso.
-        AND (
-          epa.flag = 'Finalizados'
-          OR (
-            COALESCE(cd.c_tipo_contrato_firmado, '') != 'Contrato de Corretaje con patrimonio de familia'
-            AND COALESCE(epa.flag, '') != 'En proceso'
-          )
-        )
-        AND (d.date_publication IS NULL OR fc.nid IS NOT NULL)
-        AND (cd.date_publication IS NULL OR fc.nid IS NOT NULL)
-        AND cd.v_fecha_venta IS NULL
-    ),
-    base_unica AS (
-      SELECT *, ROW_NUMBER() OVER (PARTITION BY nid ORDER BY Fecha_recorrido DESC NULLS LAST) AS rn FROM base
     )
-    SELECT nid, c_comercial_captacion, ciudad, c_equipo_seller, Fecha_recorrido, status,
-      estado_patrimonio, ficha_cms, tipo_fotos, date_publication,
-      CONCAT(IFNULL(estado_patrimonio, ''), ', ', ficha_cms, ', ', tipo_fotos) AS Estado_actual
-    FROM base_unica WHERE rn = 1
-    ORDER BY Fecha_recorrido DESC
+    SELECT
+      CAST(cd.nid AS STRING) AS nid,
+      COALESCE(h.hubspot_owner_id, cd.c_comercial_captacion) AS c_comercial_captacion,
+      cd.ciudad,
+      COALESCE(h.equipo_sellers, cd.c_equipo_seller) AS c_equipo_seller,
+      d.estado_patrimonio,
+      cd.date_publication,
+      CASE WHEN pc.id IS NULL THEN 'Sin CMS' ELSE 'Con CMS' END AS ficha_cms,
+      CASE WHEN fc.nid IS NOT NULL THEN 'Publicado sin fotos profesionales'
+           ELSE 'Sin publicar' END AS tipo_fotos
+    FROM `papyrus-data.habi_wh_inmobiliaria.consolidado_habi_inmobiliaria` cd
+    LEFT JOIN `papyrus-data.habi_brokers_listing.property_card` pc ON cd.nid = pc.nid
+    LEFT JOIN `papyrus-delivery-data.inmobiliaria.detalle_estado_captaciones` d ON cd.nid = d.nid
+    LEFT JOIN `papyrus-master.squad_bi_global.hubspot_deal` h
+      ON SAFE_CAST(cd.nid AS INT64) = h.nid AND h.pipeline = '803674753'
+    LEFT JOIN tiene_fotos_cliente fc ON cd.nid = fc.nid
+    LEFT JOIN tiene_fotos_360 f360 ON cd.nid = f360.nid
+    LEFT JOIN estado_patrimonio_actual epa ON CAST(cd.nid AS STRING) = epa.nid
+    WHERE CAST(cd.nid AS STRING) IN ({nids_str})
+      AND cd.fecha_desistio_inmobiliaria IS NULL
+      AND h.fecha_desistio_inmobiliaria IS NULL
+      AND (h.dealstage IS NULL OR h.dealstage != '1182117639')
+      AND cd.v_fecha_venta IS NULL
+      -- No tiene fotos reales subidas
+      AND f360.nid IS NULL
+      -- No publicado o publicado con logo morado (source_image_id = 3)
+      AND (cd.date_publication IS NULL OR fc.nid IS NOT NULL)
+      AND (d.date_publication IS NULL OR fc.nid IS NOT NULL)
+      -- Patrimonio: permite Finalizados, o contrato sin patrimonio y tramite no En proceso
+      AND (
+        epa.flag = 'Finalizados'
+        OR (
+          COALESCE(cd.c_tipo_contrato_firmado, '') != 'Contrato de Corretaje con patrimonio de familia'
+          AND COALESCE(epa.flag, '') != 'En proceso'
+        )
+      )
     """
     try:
         results = client.query(query).result()
         links = get_links_publicacion()
+        # mapa nid -> fecha de reporte del correo (mas reciente)
+        reportes = {}
+        ciudades_correo = {}
+        for c in completados:
+            n = c.get("nid")
+            if not n:
+                continue
+            fr = c.get("fecha_reporte", "")
+            if not reportes.get(n) or (fr and fr > reportes[n]):
+                reportes[n] = fr
+            if c.get("ciudad_correo"):
+                ciudades_correo[n] = c["ciudad_correo"]
+
         inmuebles = []
+        seen = set()
         for row in results:
             nid = str(row.nid) if row.nid else ""
+            if not nid or nid in seen:
+                continue
+            seen.add(nid)
+            tipo = row.tipo_fotos or "Sin publicar"
+            patrimonio = row.estado_patrimonio or ""
+            ficha = row.ficha_cms or ""
             inmuebles.append({
                 "nid": nid,
                 "comercial": row.c_comercial_captacion or "",
-                "ciudad": (row.ciudad or "").title(),
+                "ciudad": (row.ciudad or ciudades_correo.get(nid, "")).title(),
                 "equipo": row.c_equipo_seller or "",
-                "fecha_recorrido": str(row.Fecha_recorrido) if row.Fecha_recorrido else "",
-                "status_bubble": row.status or "",
-                "ficha_cms": row.ficha_cms or "",
-                "patrimonio": row.estado_patrimonio or "",
+                "fecha_recorrido": reportes.get(nid, ""),
+                "status_bubble": "360 Finalizado (correo)",
+                "ficha_cms": ficha,
+                "patrimonio": patrimonio,
                 "visita_360": "Con 360",
-                "tipo_fotos": row.tipo_fotos or "",
-                "estado_actual": row.Estado_actual or "",
+                "tipo_fotos": tipo,
+                "estado_actual": f"{patrimonio + ', ' if patrimonio else ''}{ficha + ', ' if ficha else ''}{tipo}",
                 "link_publicacion": links.get(nid, ""),
             })
-
-        # Agregar NIDs del correo de cleaning (visitados "SI") que no estén en la lista
-        nids_existentes = set(i["nid"] for i in inmuebles)
-        completados = leer_completados_correo()
-        nids_correo = list(set(c["nid"] for c in completados))
-        nids_nuevos = [n for n in nids_correo if n not in nids_existentes]
-
-        if nids_nuevos:
-            nids_str = ",".join(f"'{n}'" for n in nids_nuevos)
-            # NIDs que vienen con "SI" en el correo de cleaning entran a Por
-            # Publicar sin filtrar por estado actual en Bubble (el correo es
-            # la fuente de verdad para "se hizo la visita").
-            q_extra = f"""
-            SELECT CAST(cd.nid AS STRING) AS nid, cd.c_comercial_captacion, cd.ciudad, cd.c_equipo_seller,
-              d.estado_patrimonio
-            FROM `papyrus-data.habi_wh_inmobiliaria.consolidado_habi_inmobiliaria` cd
-            LEFT JOIN `papyrus-delivery-data.inmobiliaria.detalle_estado_captaciones` d ON cd.nid = d.nid
-            LEFT JOIN (
-              SELECT DISTINCT pc2.nid
-              FROM `papyrus-data.habi_brokers_listing.property_card` pc2
-              INNER JOIN `papyrus-data.habi_brokers_listing.property_image` pi2
-                ON pc2.id = pi2.property_card_id
-              WHERE pi2.source_image_id = 3
-            ) fc ON cd.nid = fc.nid
-            LEFT JOIN (
-              SELECT DISTINCT pc3.nid
-              FROM `papyrus-data.habi_brokers_listing.property_card` pc3
-              INNER JOIN `papyrus-data.habi_brokers_listing.property_image` pi3
-                ON pc3.id = pi3.property_card_id
-              WHERE pi3.source_image_id = 1
-            ) fp ON cd.nid = fp.nid
-            LEFT JOIN (
-              SELECT nid, ANY_VALUE(gravamenes_del_apartamento) AS gravamen
-              FROM `papyrus-data.habi_wh_inmobiliaria.habiinmobiliaria_sellers_gestion`
-              GROUP BY nid
-            ) gs ON cd.nid = gs.nid
-            LEFT JOIN (
-              SELECT CAST(nid AS STRING) AS nid, v_flag_desistidos_patrimonio AS flag
-              FROM (
-                SELECT nid, v_flag_desistidos_patrimonio,
-                  ROW_NUMBER() OVER (
-                    PARTITION BY nid
-                    ORDER BY v_fecha_inicio_fase_actual_patrimonio_de_familia DESC
-                  ) AS rn
-                FROM `papyrus-delivery-data.operaciones_global.control_tower_saneamiento_co_bi`
-              ) WHERE rn = 1
-            ) epa ON CAST(cd.nid AS STRING) = epa.nid
-            WHERE CAST(cd.nid AS STRING) IN ({nids_str})
-              AND cd.fecha_desistio_inmobiliaria IS NULL
-              -- Solo NIDs aun NO publicados. Si ya estan publicados con logo
-              -- morado (source_image_id=3) y sin fotos reales, van al tab
-              -- "Por Publicar Sin Fotos", no al principal.
-              AND cd.date_publication IS NULL
-              AND d.date_publication IS NULL
-              AND cd.v_fecha_venta IS NULL
-              AND fp.nid IS NULL
-              -- Logica de patrimonio: permite si ya esta finalizado, o si el contrato
-              -- no requeria levantamiento y el tramite no esta En proceso.
-              AND (
-                epa.flag = 'Finalizados'
-                OR (
-                  COALESCE(cd.c_tipo_contrato_firmado, '') != 'Contrato de Corretaje con patrimonio de familia'
-                  AND COALESCE(epa.flag, '') != 'En proceso'
-                )
-              )
-              -- Sin filtro por estado Bubble: el "SI" del correo de cleaning
-              -- es la fuente de verdad para "se realizó la visita".
-            """
-            try:
-                for row in client.query(q_extra).result():
-                    nid = str(row.nid)
-                    completado = next((c for c in completados if c["nid"] == nid), {})
-                    inmuebles.append({
-                        "nid": nid,
-                        "comercial": row.c_comercial_captacion or "",
-                        "ciudad": (row.ciudad or completado.get("ciudad_correo", "")).title(),
-                        "equipo": row.c_equipo_seller or "",
-                        "fecha_recorrido": completado.get("fecha_reporte", "Reciente (correo)"),
-                        "status_bubble": "",
-                        "ficha_cms": "",
-                        "patrimonio": row.estado_patrimonio or "Por confirmar",
-                        "visita_360": "Con 360",
-                        "tipo_fotos": "Con fotos profesionales",
-                        "estado_actual": f"Con fotos profesionales - Visitado {completado.get('fecha_reporte', '')} (correo)",
-                        "link_publicacion": links.get(nid, ""),
-                    })
-            except Exception as e:
-                print(f"Error enriqueciendo completados correo: {e}")
-
-        # Poner los del correo de primeros, todo ordenado de más reciente a más viejo
-        correo_nids = set(c["nid"] for c in completados) if completados else set()
-        del_correo = sorted([i for i in inmuebles if i["nid"] in correo_nids],
-                            key=lambda x: x.get("fecha_recorrido", "") or "", reverse=True)
-        del_bq = sorted([i for i in inmuebles if i["nid"] not in correo_nids],
-                        key=lambda x: x.get("fecha_recorrido", "") or "", reverse=True)
-        inmuebles = del_correo + del_bq
-
+        # ordenar mas reciente primero
+        inmuebles.sort(key=lambda x: x.get("fecha_recorrido", "") or "", reverse=True)
         return jsonify(inmuebles)
     except Exception as e:
         print(f"Error consultando por publicar: {e}")
