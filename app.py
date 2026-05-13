@@ -1686,19 +1686,10 @@ def api_por_publicar():
 
         if nids_nuevos:
             nids_str = ",".join(f"'{n}'" for n in nids_nuevos)
+            # NIDs que vienen con "SI" en el correo de cleaning entran a Por
+            # Publicar sin filtrar por estado actual en Bubble (el correo es
+            # la fuente de verdad para "se hizo la visita").
             q_extra = f"""
-            WITH bubble_ultima AS (
-              -- Estado mas reciente de cada NID dentro de Habi Inmobiliaria.
-              -- Si la ultima visita aun no esta Finalizada (ej. Cerrado/Agendado/
-              -- Cancelado/No realizada), el correo de cleaning podria ser una
-              -- referencia stale -> no agregar via este path.
-              SELECT nid, status FROM (
-                SELECT b.nid, b.status,
-                  ROW_NUMBER() OVER (PARTITION BY b.nid ORDER BY b.modified_date DESC) AS rn
-                FROM `papyrus-master.bubble_gold.mart_bubble_schedule_co` b
-                WHERE b.visit_category = 'Habi Inmobiliaria'
-              ) WHERE rn = 1
-            )
             SELECT CAST(cd.nid AS STRING) AS nid, cd.c_comercial_captacion, cd.ciudad, cd.c_equipo_seller,
               d.estado_patrimonio
             FROM `papyrus-data.habi_wh_inmobiliaria.consolidado_habi_inmobiliaria` cd
@@ -1733,7 +1724,6 @@ def api_por_publicar():
                 FROM `papyrus-delivery-data.operaciones_global.control_tower_saneamiento_co_bi`
               ) WHERE rn = 1
             ) epa ON CAST(cd.nid AS STRING) = epa.nid
-            LEFT JOIN bubble_ultima bu ON CAST(cd.nid AS STRING) = bu.nid
             WHERE CAST(cd.nid AS STRING) IN ({nids_str})
               AND cd.fecha_desistio_inmobiliaria IS NULL
               AND (d.date_publication IS NULL OR fc.nid IS NOT NULL)
@@ -1749,15 +1739,8 @@ def api_por_publicar():
                   AND COALESCE(epa.flag, '') != 'En proceso'
                 )
               )
-              -- Si la ultima visita en Bubble (Habi Inmo) sigue en algun estado
-              -- que indica que la visita aun no se hizo (Cerrado / Agendado /
-              -- Cancelado / No realizada), el correo de cleaning probablemente
-              -- es de una visita previa reagendada -> excluir hasta que Bubble
-              -- la marque como Finalizado.
-              AND (
-                bu.status IS NULL
-                OR bu.status NOT IN ('Cerrado', 'Agendado', 'Cancelado', 'No realizada')
-              )
+              -- Sin filtro por estado Bubble: el "SI" del correo de cleaning
+              -- es la fuente de verdad para "se realizó la visita".
             """
             try:
                 for row in client.query(q_extra).result():
