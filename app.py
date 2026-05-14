@@ -1642,6 +1642,9 @@ def api_por_publicar():
       AND h.fecha_desistio_inmobiliaria IS NULL
       AND (h.dealstage IS NULL OR h.dealstage != '1182117639')
       AND cd.v_fecha_venta IS NULL
+      -- Excluir despublicados (card inactiva) y estados terminales 3, 5, 8
+      AND COALESCE(pc.active, 1) != 0
+      AND COALESCE(ps.current_state_id, 0) NOT IN (3, 5, 8)
       -- No publicado realmente, o publicado pero solo con logo morado (sin fotos reales id=1)
       AND (
         NOT (COALESCE(pc.active, 0) = 1 AND COALESCE(ps.current_state_id, 0) = 2)
