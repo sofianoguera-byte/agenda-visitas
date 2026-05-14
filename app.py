@@ -1641,6 +1641,12 @@ def api_por_publicar():
       AND h.fecha_desistio_inmobiliaria IS NULL
       AND (h.dealstage IS NULL OR h.dealstage != '1182117639')
       AND cd.v_fecha_venta IS NULL
+      -- No tiene fotos reales subidas
+      AND f360.nid IS NULL
+      -- No publicado o publicado con logo morado (source_image_id = 3)
+      AND (cd.date_publication IS NULL OR fc.nid IS NOT NULL)
+      AND (d.date_publication IS NULL OR fc.nid IS NOT NULL)
+      -- Patrimonio: permite Finalizados, o contrato sin patrimonio y tramite no En proceso
       AND (
         epa.flag = 'Finalizados'
         OR (
