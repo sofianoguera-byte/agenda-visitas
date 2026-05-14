@@ -1354,6 +1354,41 @@ def leer_motivos_no_publicar():
     return motivos
 
 
+def leer_nids_publicados_sheet():
+    """Lee el sheet de seguimiento (BOGOTA HI / CIUDADES HI) y devuelve un set
+    de NIDs cuya columna 'Estado Publicación' empieza con 'publicad' (Publicado).
+    Sirve para excluir del dashboard inmuebles que ya estan marcados como
+    publicados en el sheet aunque el correo de cleaning los siga reportando.
+    """
+    publicados = set()
+    for tab_name in SHEETS_MOTIVOS_TABS.keys():
+        try:
+            rows, fieldnames = _read_csv_by_sheet_name(SHEETS_ID_MOTIVOS, tab_name)
+        except Exception as e:
+            print(f"[publicados-sheet] no se pudo leer '{tab_name}': {e}")
+            continue
+        if not rows:
+            continue
+        def _find(*keys):
+            for k in keys:
+                for f in fieldnames:
+                    if (f or "").strip().lower() == k.lower():
+                        return f
+            return None
+        nid_col = _find("nid", "NID")
+        est_col = _find("Estado Publicación", "Estado Publicacion", "estado publicacion",
+                        "estado publicación")
+        if not nid_col or not est_col:
+            print(f"[publicados-sheet] tab '{tab_name}' faltan columnas. headers={fieldnames}")
+            continue
+        for row in rows:
+            nid = str(row.get(nid_col, "")).strip()
+            est = (row.get(est_col) or "").strip().lower()
+            if nid and est.startswith("publicad"):
+                publicados.add(nid)
+    return publicados
+
+
 @app.route("/api/motivos-no-publicar")
 def api_motivos_no_publicar():
     """Diccionario NID -> {motivo, observaciones, fuente} desde el sheet de motivos."""
@@ -1665,6 +1700,7 @@ def api_por_publicar():
     try:
         results = client.query(query).result()
         links = get_links_publicacion()
+        publicados_sheet = leer_nids_publicados_sheet()
         # mapa nid -> fecha de reporte del correo (mas reciente)
         reportes = {}
         ciudades_correo = {}
@@ -1683,6 +1719,9 @@ def api_por_publicar():
         for row in results:
             nid = str(row.nid) if row.nid else ""
             if not nid or nid in seen:
+                continue
+            # excluir si el sheet ya lo marca como Publicado
+            if nid in publicados_sheet:
                 continue
             seen.add(nid)
             tipo = row.tipo_fotos or "Sin publicar"
