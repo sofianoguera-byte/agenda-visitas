@@ -1630,6 +1630,7 @@ def api_por_publicar():
            ELSE 'Sin publicar' END AS tipo_fotos
     FROM `papyrus-data.habi_wh_inmobiliaria.consolidado_habi_inmobiliaria` cd
     LEFT JOIN `papyrus-data.habi_brokers_listing.property_card` pc ON cd.nid = pc.nid
+    LEFT JOIN `papyrus-data.habi_brokers_listing.property_state` ps ON pc.id = ps.property_card_id
     LEFT JOIN `papyrus-delivery-data.inmobiliaria.detalle_estado_captaciones` d ON cd.nid = d.nid
     LEFT JOIN `papyrus-master.squad_bi_global.hubspot_deal` h
       ON SAFE_CAST(cd.nid AS INT64) = h.nid AND h.pipeline = '803674753'
@@ -1641,11 +1642,11 @@ def api_por_publicar():
       AND h.fecha_desistio_inmobiliaria IS NULL
       AND (h.dealstage IS NULL OR h.dealstage != '1182117639')
       AND cd.v_fecha_venta IS NULL
-      -- No tiene fotos reales subidas
-      AND f360.nid IS NULL
-      -- No publicado o publicado con logo morado (source_image_id = 3)
-      AND (cd.date_publication IS NULL OR fc.nid IS NOT NULL)
-      AND (d.date_publication IS NULL OR fc.nid IS NOT NULL)
+      -- No publicado realmente, o publicado pero solo con logo morado (sin fotos reales id=1)
+      AND (
+        NOT (COALESCE(pc.active, 0) = 1 AND COALESCE(ps.current_state_id, 0) = 2)
+        OR f360.nid IS NULL
+      )
       -- Patrimonio: permite Finalizados, o contrato sin patrimonio y tramite no En proceso
       AND (
         epa.flag = 'Finalizados'
