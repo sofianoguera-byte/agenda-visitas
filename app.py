@@ -1645,6 +1645,9 @@ def api_por_publicar():
       -- Excluir despublicados (card inactiva) y estados terminales 3, 5, 8
       AND COALESCE(pc.active, 1) != 0
       AND COALESCE(ps.current_state_id, 0) NOT IN (3, 5, 8)
+      -- Excluir borradores (state=1) que ya tienen fotos pro: estuvieron publicados antes,
+      -- algo los esta bajando a borrador y se revisan aparte
+      AND NOT (COALESCE(ps.current_state_id, 0) = 1 AND f360.nid IS NOT NULL)
       -- No publicado realmente, o publicado pero solo con logo morado (sin fotos reales id=1)
       AND (
         NOT (COALESCE(pc.active, 0) = 1 AND COALESCE(ps.current_state_id, 0) = 2)
